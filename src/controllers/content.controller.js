@@ -7,6 +7,7 @@ import { AppError } from '../utils/errors.js';
 import { normalizeTag } from '../utils/tag.js';
 
 const townHalls = ['TH18', 'TH17', 'TH16', 'TH15'];
+const armyCategories = ['troops', 'spells', 'heroes', 'heroEquipment'];
 const kindSchemas = {
   layouts: z.object({
     title: z.string().min(3).max(120),
@@ -35,6 +36,12 @@ const kindSchemas = {
     pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([]),
     published: z.boolean().optional().default(true),
     featured: z.boolean().optional().default(false)
+  }),
+  army: z.object({
+    name: z.string().min(1).max(120),
+    category: z.enum(armyCategories),
+    village: z.enum(['home', 'builderBase']),
+    imageUrl: z.string().url()
   })
 };
 
@@ -60,6 +67,10 @@ function ensureKind(kind) {
   if (!kindSchemas[kind]) {
     throw new AppError('Unknown content type.', 404, true);
   }
+}
+
+function normalizeArmyName(value) {
+  return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 function toUuid(value) {
@@ -121,6 +132,19 @@ function mapPost(row) {
   };
 }
 
+function mapArmyItem(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    normalizedName: row.normalized_name,
+    category: row.category,
+    village: row.village,
+    imageUrl: row.image_url,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 async function playerIdentity(playerTag) {
   const normalizedTag = normalizeTag(playerTag);
   const player = await clashService.getPlayer(normalizedTag);
@@ -166,6 +190,20 @@ export class ContentController {
       return res.json({ items: result.rows.map(mapStrategy) });
     }
 
+    if (kind === 'army') {
+      const category = req.query.category ? String(req.query.category) : null;
+      const values = category ? [category] : [];
+      const result = await pool.query(
+        `
+        select * from army_items
+        ${category ? 'where category = $1' : ''}
+        order by category asc, village asc, name asc
+        `,
+        values
+      );
+      return res.json({ items: result.rows.map(mapArmyItem) });
+    }
+
     const result = await pool.query(
       `
       select * from social_posts
@@ -189,6 +227,13 @@ export class ContentController {
     if (kind === 'strategies') {
       const result = await pool.query('select * from content_strategies order by created_at desc');
       return res.json({ items: result.rows.map(mapStrategy) });
+    }
+
+    if (kind === 'army') {
+      const result = await pool.query(
+        'select * from army_items order by category asc, village asc, name asc'
+      );
+      return res.json({ items: result.rows.map(mapArmyItem) });
     }
 
     const result = await pool.query('select * from social_posts order by created_at desc');
@@ -237,6 +282,29 @@ export class ContentController {
         ]
       );
       return res.status(201).json(mapStrategy(result.rows[0]));
+    }
+
+    if (kind === 'army') {
+      const result = await pool.query(
+        `
+        insert into army_items (name, normalized_name, category, village, image_url)
+        values ($1, $2, $3, $4, $5)
+        on conflict (normalized_name, category, village)
+        do update set
+          name = excluded.name,
+          image_url = excluded.image_url,
+          updated_at = now()
+        returning *
+        `,
+        [
+          payload.name,
+          normalizeArmyName(payload.name),
+          payload.category,
+          payload.village,
+          payload.imageUrl
+        ]
+      );
+      return res.status(201).json(mapArmyItem(result.rows[0]));
     }
 
     const identity = payload.playerTag
@@ -348,6 +416,30 @@ export class ContentController {
       return res.json(mapStrategy(result.rows[0]));
     }
 
+    if (kind === 'army') {
+      const current = await pool.query('select * from army_items where id = $1', [id]);
+      if (!current.rows[0]) throw new AppError('Content not found.', 404, true);
+      const next = { ...mapArmyItem(current.rows[0]), ...payload };
+      const result = await pool.query(
+        `
+        update army_items
+        set name = $2, normalized_name = $3, category = $4, village = $5,
+            image_url = $6, updated_at = now()
+        where id = $1
+        returning *
+        `,
+        [
+          id,
+          next.name,
+          normalizeArmyName(next.name),
+          next.category,
+          next.village,
+          next.imageUrl
+        ]
+      );
+      return res.json(mapArmyItem(result.rows[0]));
+    }
+
     throw new AppError('Post updates are not supported from this route yet.', 400, true);
   }
 
@@ -360,7 +452,9 @@ export class ContentController {
         ? 'content_layouts'
         : kind === 'strategies'
           ? 'content_strategies'
-          : 'social_posts';
+          : kind === 'army'
+            ? 'army_items'
+            : 'social_posts';
     await pool.query(`delete from ${table} where id = $1`, [id]);
     return res.status(204).send();
   }

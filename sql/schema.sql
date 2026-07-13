@@ -107,3 +107,18 @@ create table if not exists social_post_comments (
 
 create index if not exists idx_social_post_comments_post_id
   on social_post_comments (post_id, created_at desc);
+
+create table if not exists army_items (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  normalized_name text not null,
+  category text not null check (category in ('troops', 'spells', 'heroes', 'heroEquipment')),
+  village text not null check (village in ('home', 'builderBase')),
+  image_url text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (normalized_name, category, village)
+);
+
+create index if not exists idx_army_items_lookup
+  on army_items (normalized_name, category, village);
