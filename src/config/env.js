@@ -27,7 +27,10 @@ const envSchema = z.object({
   PLAYER_CACHE_TTL_SECONDS: z.coerce.number().default(120),
   CLAN_CACHE_TTL_SECONDS: z.coerce.number().default(120),
   GLOBAL_RATE_LIMIT_MAX: z.coerce.number().default(120),
-  AUTH_RATE_LIMIT_MAX: z.coerce.number().default(10)
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().default(10),
+  MONGODB_URI: z.string().optional(),
+  MONGODB_DATABASE: z.string().default('clash_companion'),
+  ADMIN_API_KEY: z.string().min(24).optional()
 });
 
 const result = envSchema.safeParse(process.env);
@@ -50,5 +53,6 @@ export const env = {
   isProduction: parsed.NODE_ENV === 'production',
   corsAllowedOrigins: parsed.CORS_ALLOWED_ORIGINS.split(',')
     .map((origin) => origin.trim())
-    .filter(Boolean)
+    .filter(Boolean),
+  hasMongo: Boolean(parsed.MONGODB_URI)
 };
