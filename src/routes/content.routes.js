@@ -7,6 +7,11 @@ import { asyncHandler } from '../utils/async-handler.js';
 export const contentRouter = Router();
 const publicKinds = ['layouts', 'strategies', 'posts'];
 for (const kind of publicKinds) contentRouter.get(`/${kind}`, asyncHandler((req, res) => contentController.listPublic(req, res, kind)));
+contentRouter.post('/posts', asyncHandler((req, res) => contentController.createPublicPost(req, res)));
+contentRouter.post('/posts/:id/like', asyncHandler((req, res) => contentController.like(req, res)));
+contentRouter.post('/posts/:id/comment', asyncHandler((req, res) => contentController.comment(req, res)));
+contentRouter.post('/posts/:id/share', asyncHandler((req, res) => contentController.share(req, res)));
+contentRouter.post('/uploads/image', asyncHandler((req, res) => contentController.upload(req, res)));
 
 export const adminContentRouter = Router();
 adminContentRouter.use(requireAdmin);
@@ -14,3 +19,4 @@ adminContentRouter.get('/:kind', asyncHandler((req, res) => contentController.li
 adminContentRouter.post('/:kind', asyncHandler((req, res) => contentController.create(req, res)));
 adminContentRouter.patch('/:kind/:id', asyncHandler((req, res) => contentController.update(req, res)));
 adminContentRouter.delete('/:kind/:id', asyncHandler((req, res) => contentController.remove(req, res)));
+adminContentRouter.post('/uploads/image', asyncHandler((req, res) => contentController.upload(req, res)));

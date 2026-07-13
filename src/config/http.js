@@ -1,4 +1,4 @@
 export const httpConfig = {
   requestTimeoutMs: 20_000,
-  jsonBodyLimit: '200kb'
+  jsonBodyLimit: '2mb'
 };

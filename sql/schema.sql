@@ -33,3 +33,77 @@ create table if not exists auth_audit_logs (
   reason text,
   created_at timestamptz not null default now()
 );
+
+create table if not exists content_layouts (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  town_hall text not null,
+  description text not null default '',
+  image_url text not null default '',
+  layout_url text not null,
+  published boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_content_layouts_public
+  on content_layouts (town_hall, published, created_at desc);
+
+create table if not exists content_strategies (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  town_hall text not null,
+  troops jsonb not null default '[]'::jsonb,
+  spells jsonb not null default '[]'::jsonb,
+  clan_castle jsonb not null default '[]'::jsonb,
+  heroes jsonb not null default '[]'::jsonb,
+  published boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_content_strategies_public
+  on content_strategies (town_hall, published, created_at desc);
+
+create table if not exists social_posts (
+  id uuid primary key default gen_random_uuid(),
+  player_tag text not null,
+  player_name text not null,
+  player_avatar_url text,
+  body text not null default '',
+  image_url text not null default '',
+  poll_question text,
+  poll_options jsonb not null default '[]'::jsonb,
+  like_count integer not null default 0,
+  comment_count integer not null default 0,
+  share_count integer not null default 0,
+  featured boolean not null default false,
+  published boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint social_posts_content_check check (
+    body <> '' or image_url <> '' or poll_question is not null
+  )
+);
+
+create index if not exists idx_social_posts_public
+  on social_posts (published, featured, created_at desc);
+
+create table if not exists social_post_likes (
+  post_id uuid not null references social_posts(id) on delete cascade,
+  player_tag text not null,
+  created_at timestamptz not null default now(),
+  primary key (post_id, player_tag)
+);
+
+create table if not exists social_post_comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references social_posts(id) on delete cascade,
+  player_tag text not null,
+  player_name text not null,
+  body text not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_social_post_comments_post_id
+  on social_post_comments (post_id, created_at desc);

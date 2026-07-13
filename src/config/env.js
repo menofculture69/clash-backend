@@ -30,7 +30,10 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_MAX: z.coerce.number().default(10),
   MONGODB_URI: z.string().optional(),
   MONGODB_DATABASE: z.string().default('clash_companion'),
-  ADMIN_API_KEY: z.string().min(24).optional()
+  ADMIN_API_KEY: z.string().min(24).optional(),
+  CLOUDINARY_CLOUD_NAME: z.string().optional(),
+  CLOUDINARY_API_KEY: z.string().optional(),
+  CLOUDINARY_API_SECRET: z.string().optional()
 });
 
 const result = envSchema.safeParse(process.env);
@@ -54,5 +57,10 @@ export const env = {
   corsAllowedOrigins: parsed.CORS_ALLOWED_ORIGINS.split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
-  hasMongo: Boolean(parsed.MONGODB_URI)
+  hasMongo: Boolean(parsed.MONGODB_URI),
+  hasCloudinary: Boolean(
+    parsed.CLOUDINARY_CLOUD_NAME &&
+      parsed.CLOUDINARY_API_KEY &&
+      parsed.CLOUDINARY_API_SECRET
+  )
 };
