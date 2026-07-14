@@ -8,6 +8,17 @@ import { normalizeTag } from '../utils/tag.js';
 
 const townHalls = ['TH18', 'TH17', 'TH16', 'TH15'];
 const armyCategories = ['troops', 'spells', 'heroes', 'heroEquipment'];
+const strategyUnitSchema = z
+  .union([
+    z.string().min(1).max(120),
+    z.object({
+      name: z.string().min(1).max(120),
+      count: z.coerce.number().int().min(1).max(999).optional().default(1)
+    })
+  ])
+  .transform((value) =>
+    typeof value === 'string' ? { name: value, count: 1 } : { name: value.name, count: value.count }
+  );
 const kindSchemas = {
   layouts: z.object({
     title: z.string().min(3).max(120),
@@ -20,10 +31,10 @@ const kindSchemas = {
   strategies: z.object({
     title: z.string().min(3).max(120),
     townHall: z.enum(townHalls),
-    troops: z.array(z.string()).optional().default([]),
-    spells: z.array(z.string()).optional().default([]),
-    clanCastle: z.array(z.string()).optional().default([]),
-    heroes: z.array(z.string()).optional().default([]),
+    troops: z.array(strategyUnitSchema).optional().default([]),
+    spells: z.array(strategyUnitSchema).optional().default([]),
+    clanCastle: z.array(strategyUnitSchema).optional().default([]),
+    heroes: z.array(strategyUnitSchema).optional().default([]),
     published: z.boolean().optional().default(true)
   }),
   posts: z.object({
@@ -96,14 +107,18 @@ function mapLayout(row) {
 }
 
 function mapStrategy(row) {
+  const units = (value) =>
+    (value ?? []).map((entry) =>
+      typeof entry === 'string' ? { name: entry, count: 1 } : { name: entry.name, count: entry.count ?? 1 }
+    );
   return {
     id: row.id,
     title: row.title,
     townHall: row.town_hall,
-    troops: row.troops ?? [],
-    spells: row.spells ?? [],
-    clanCastle: row.clan_castle ?? [],
-    heroes: row.heroes ?? [],
+    troops: units(row.troops),
+    spells: units(row.spells),
+    clanCastle: units(row.clan_castle),
+    heroes: units(row.heroes),
     published: row.published,
     createdAt: row.created_at,
     updatedAt: row.updated_at
