@@ -74,6 +74,7 @@ create table if not exists social_posts (
   image_url text not null default '',
   poll_question text,
   poll_options jsonb not null default '[]'::jsonb,
+  hashtags jsonb not null default '[]'::jsonb,
   like_count integer not null default 0,
   comment_count integer not null default 0,
   share_count integer not null default 0,
@@ -86,8 +87,23 @@ create table if not exists social_posts (
   )
 );
 
+alter table social_posts
+  add column if not exists hashtags jsonb not null default '[]'::jsonb;
+
 create index if not exists idx_social_posts_public
   on social_posts (published, featured, created_at desc);
+
+create table if not exists social_notifications (
+  id uuid primary key default gen_random_uuid(),
+  player_tag text,
+  type text not null,
+  message text not null,
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_social_notifications_recent
+  on social_notifications (created_at desc);
 
 create table if not exists social_post_likes (
   post_id uuid not null references social_posts(id) on delete cascade,

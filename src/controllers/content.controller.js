@@ -8,6 +8,13 @@ import { normalizeTag } from '../utils/tag.js';
 
 const townHalls = ['TH18', 'TH17', 'TH16', 'TH15'];
 const armyCategories = ['troops', 'spells', 'heroes', 'heroEquipment'];
+const socialHashtags = [
+  'Trophies',
+  'Town Hall Level',
+  'Donation',
+  'Clan Capital Contribution',
+  'War Stars'
+];
 const strategyUnitSchema = z
   .union([
     z.string().min(1).max(120),
@@ -45,6 +52,7 @@ const kindSchemas = {
     imageUrl: z.string().url().optional().default(''),
     pollQuestion: z.string().max(160).optional().nullable(),
     pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([]),
+    hashtags: z.array(z.enum(socialHashtags)).max(5).optional().default([]),
     published: z.boolean().optional().default(true),
     featured: z.boolean().optional().default(false)
   }),
@@ -66,7 +74,8 @@ const publicPostSchema = z.object({
   body: z.string().max(2000).optional().default(''),
   imageUrl: z.string().url().optional().default(''),
   pollQuestion: z.string().max(160).optional().nullable(),
-  pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([])
+  pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([]),
+  hashtags: z.array(z.enum(socialHashtags)).max(5).optional().default([])
 });
 
 const commentSchema = z.object({
@@ -137,6 +146,7 @@ function mapPost(row) {
     imageUrl: row.image_url,
     pollQuestion: row.poll_question,
     pollOptions: row.poll_options ?? [],
+    hashtags: row.hashtags ?? [],
     likeCount: row.like_count,
     commentCount: row.comment_count,
     shareCount: row.share_count,
@@ -144,6 +154,17 @@ function mapPost(row) {
     published: row.published,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function mapNotification(row) {
+  return {
+    id: row.id,
+    playerTag: row.player_tag,
+    type: row.type,
+    message: row.message,
+    metadata: row.metadata ?? {},
+    createdAt: row.created_at
   };
 }
 
@@ -176,6 +197,7 @@ export class ContentController {
     ensureKind(kind);
     const townHall = req.query.townHall ? String(req.query.townHall).toUpperCase() : null;
     const featuredOnly = kind === 'posts' && req.query.feed === 'featured';
+    const hashtag = kind === 'posts' && req.query.hashtag ? String(req.query.hashtag) : null;
 
     if (kind === 'layouts') {
       const values = townHall ? [townHall] : [];
@@ -223,9 +245,11 @@ export class ContentController {
       `
       select * from social_posts
       where published = true ${featuredOnly ? 'and featured = true' : ''}
+        ${hashtag ? "and hashtags @> $1::jsonb" : ''}
       order by created_at desc
       limit 100
-      `
+      `,
+      hashtag ? [JSON.stringify([hashtag])] : []
     );
     return res.json({ items: result.rows.map(mapPost) });
   }
@@ -332,8 +356,8 @@ export class ContentController {
     const result = await pool.query(
       `
       insert into social_posts
-        (player_tag, player_name, player_avatar_url, body, image_url, poll_question, poll_options, featured, published)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        (player_tag, player_name, player_avatar_url, body, image_url, poll_question, poll_options, hashtags, featured, published)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       returning *
       `,
       [
@@ -344,6 +368,7 @@ export class ContentController {
         payload.imageUrl,
         payload.pollQuestion ?? null,
         JSON.stringify(payload.pollOptions),
+        JSON.stringify(payload.hashtags),
         payload.featured,
         payload.published
       ]
@@ -357,8 +382,8 @@ export class ContentController {
     const result = await pool.query(
       `
       insert into social_posts
-        (player_tag, player_name, player_avatar_url, body, image_url, poll_question, poll_options, published)
-      values ($1, $2, $3, $4, $5, $6, $7, true)
+        (player_tag, player_name, player_avatar_url, body, image_url, poll_question, poll_options, hashtags, published)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, true)
       returning *
       `,
       [
@@ -368,7 +393,8 @@ export class ContentController {
         payload.body,
         payload.imageUrl,
         payload.pollQuestion ?? null,
-        JSON.stringify(payload.pollOptions)
+        JSON.stringify(payload.pollOptions),
+        JSON.stringify(payload.hashtags)
       ]
     );
     return res.status(201).json(mapPost(result.rows[0]));
@@ -470,8 +496,38 @@ export class ContentController {
           : kind === 'army'
             ? 'army_items'
             : 'social_posts';
+    if (kind === 'posts') {
+      const current = await pool.query('select * from social_posts where id = $1', [id]);
+      if (current.rows[0]) {
+        await pool.query(
+          `
+          insert into social_notifications (player_tag, type, message, metadata)
+          values ($1, 'post_deleted', $2, $3)
+          `,
+          [
+            current.rows[0].player_tag,
+            'Your post was removed by an admin because it did not follow community rules.',
+            JSON.stringify({ postId: id, body: current.rows[0].body ?? '' })
+          ]
+        );
+      }
+    }
     await pool.query(`delete from ${table} where id = $1`, [id]);
     return res.status(204).send();
+  }
+
+  async notifications(req, res) {
+    const playerTag = req.query.playerTag ? normalizeTag(String(req.query.playerTag)) : null;
+    const result = await pool.query(
+      `
+      select * from social_notifications
+      where player_tag is null ${playerTag ? 'or player_tag = $1' : ''}
+      order by created_at desc
+      limit 30
+      `,
+      playerTag ? [playerTag] : []
+    );
+    return res.json({ items: result.rows.map(mapNotification) });
   }
 
   async upload(req, res) {
