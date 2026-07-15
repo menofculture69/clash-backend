@@ -70,6 +70,8 @@ create table if not exists social_posts (
   player_tag text not null,
   player_name text not null,
   player_avatar_url text,
+  player_clan_name text,
+  player_clan_role text,
   body text not null default '',
   image_url text not null default '',
   poll_question text,
@@ -89,6 +91,10 @@ create table if not exists social_posts (
 
 alter table social_posts
   add column if not exists hashtags jsonb not null default '[]'::jsonb;
+
+alter table social_posts
+  add column if not exists player_clan_name text,
+  add column if not exists player_clan_role text;
 
 create index if not exists idx_social_posts_public
   on social_posts (published, featured, created_at desc);

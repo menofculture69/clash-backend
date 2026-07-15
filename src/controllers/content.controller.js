@@ -140,6 +140,8 @@ function mapPost(row) {
     playerTag: row.player_tag,
     playerName: row.player_name,
     playerAvatarUrl: row.player_avatar_url,
+    playerClanName: row.player_clan_name,
+    playerClanRole: row.player_clan_role,
     authorName: row.player_name,
     authorRole: row.player_tag,
     body: row.body,
@@ -168,6 +170,17 @@ function mapNotification(row) {
   };
 }
 
+function mapComment(row) {
+  return {
+    id: row.id,
+    postId: row.post_id,
+    playerTag: row.player_tag,
+    playerName: row.player_name,
+    body: row.body,
+    createdAt: row.created_at
+  };
+}
+
 function mapArmyItem(row) {
   return {
     id: row.id,
@@ -185,10 +198,22 @@ async function playerIdentity(playerTag) {
   const normalizedTag = normalizeTag(playerTag);
   const player = await clashService.getPlayer(normalizedTag);
   const leagueIcon = player.league?.iconUrls?.medium ?? player.league?.iconUrls?.small ?? null;
+  let clanRole = null;
+  if (player.clan?.tag) {
+    try {
+      const members = await clashService.getClanMembers(player.clan.tag);
+      const member = members.find((entry) => normalizeTag(entry.tag) === normalizedTag);
+      clanRole = member?.role ?? null;
+    } catch {
+      clanRole = null;
+    }
+  }
   return {
     playerTag: normalizedTag,
     playerName: String(player.name ?? normalizedTag),
-    playerAvatarUrl: leagueIcon
+    playerAvatarUrl: leagueIcon,
+    playerClanName: player.clan?.name ?? null,
+    playerClanRole: clanRole
   };
 }
 
@@ -351,19 +376,23 @@ export class ContentController {
       : {
           playerTag: payload.authorRole ?? 'admin',
           playerName: payload.authorName ?? 'Clash Companion',
-          playerAvatarUrl: null
+          playerAvatarUrl: null,
+          playerClanName: null,
+          playerClanRole: null
         };
     const result = await pool.query(
       `
       insert into social_posts
-        (player_tag, player_name, player_avatar_url, body, image_url, poll_question, poll_options, hashtags, featured, published)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        (player_tag, player_name, player_avatar_url, player_clan_name, player_clan_role, body, image_url, poll_question, poll_options, hashtags, featured, published)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       returning *
       `,
       [
         identity.playerTag,
         identity.playerName,
         identity.playerAvatarUrl,
+        identity.playerClanName,
+        identity.playerClanRole,
         payload.body,
         payload.imageUrl,
         payload.pollQuestion ?? null,
@@ -382,14 +411,16 @@ export class ContentController {
     const result = await pool.query(
       `
       insert into social_posts
-        (player_tag, player_name, player_avatar_url, body, image_url, poll_question, poll_options, hashtags, published)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, true)
+        (player_tag, player_name, player_avatar_url, player_clan_name, player_clan_role, body, image_url, poll_question, poll_options, hashtags, published)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)
       returning *
       `,
       [
         identity.playerTag,
         identity.playerName,
         identity.playerAvatarUrl,
+        identity.playerClanName,
+        identity.playerClanRole,
         payload.body,
         payload.imageUrl,
         payload.pollQuestion ?? null,
@@ -579,7 +610,21 @@ export class ContentController {
       `,
       [postId]
     );
-    return res.status(201).json(comment.rows[0]);
+    return res.status(201).json(mapComment(comment.rows[0]));
+  }
+
+  async comments(req, res) {
+    const postId = toUuid(req.params.id);
+    const result = await pool.query(
+      `
+      select * from social_post_comments
+      where post_id = $1
+      order by created_at asc
+      limit 100
+      `,
+      [postId]
+    );
+    return res.json({ items: result.rows.map(mapComment) });
   }
 
   async share(req, res) {
