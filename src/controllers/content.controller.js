@@ -7,7 +7,15 @@ import { AppError } from '../utils/errors.js';
 import { normalizeTag } from '../utils/tag.js';
 
 const townHalls = ['TH18', 'TH17', 'TH16', 'TH15'];
-const armyCategories = ['troops', 'spells', 'heroes', 'heroEquipment'];
+const armyCategories = [
+  'troops',
+  'superTroops',
+  'spells',
+  'heroes',
+  'siegeMachines',
+  'pets',
+  'heroEquipment'
+];
 const socialHashtags = [
   'Trophies',
   'Town Hall Level',

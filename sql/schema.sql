@@ -134,7 +134,7 @@ create table if not exists army_items (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   normalized_name text not null,
-  category text not null check (category in ('troops', 'spells', 'heroes', 'heroEquipment')),
+  category text not null check (category in ('troops', 'superTroops', 'spells', 'heroes', 'siegeMachines', 'pets', 'heroEquipment')),
   village text not null check (village in ('home', 'builderBase')),
   image_url text not null,
   created_at timestamptz not null default now(),
