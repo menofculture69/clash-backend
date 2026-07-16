@@ -57,6 +57,7 @@ create table if not exists content_strategies (
   spells jsonb not null default '[]'::jsonb,
   clan_castle jsonb not null default '[]'::jsonb,
   heroes jsonb not null default '[]'::jsonb,
+  hero_loadouts jsonb not null default '[]'::jsonb,
   published boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -64,6 +65,9 @@ create table if not exists content_strategies (
 
 create index if not exists idx_content_strategies_public
   on content_strategies (town_hall, published, created_at desc);
+
+alter table content_strategies
+  add column if not exists hero_loadouts jsonb not null default '[]'::jsonb;
 
 create table if not exists social_posts (
   id uuid primary key default gen_random_uuid(),

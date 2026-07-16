@@ -34,6 +34,14 @@ const strategyUnitSchema = z
   .transform((value) =>
     typeof value === 'string' ? { name: value, count: 1 } : { name: value.name, count: value.count }
   );
+const heroLoadoutSchema = z.object({
+  hero: strategyUnitSchema,
+  pet: strategyUnitSchema,
+  equipment: z.array(strategyUnitSchema).length(2)
+}).refine(
+  (loadout) => new Set(loadout.equipment.map((item) => item.name)).size === 2,
+  { message: 'Each hero must use two different equipment items.', path: ['equipment'] }
+);
 const kindSchemas = {
   layouts: z.object({
     title: z.string().min(3).max(120),
@@ -50,6 +58,7 @@ const kindSchemas = {
     spells: z.array(strategyUnitSchema).optional().default([]),
     clanCastle: z.array(strategyUnitSchema).optional().default([]),
     heroes: z.array(strategyUnitSchema).optional().default([]),
+    heroLoadouts: z.array(heroLoadoutSchema).max(4).optional().default([]),
     published: z.boolean().optional().default(true)
   }),
   posts: z.object({
@@ -136,6 +145,11 @@ function mapStrategy(row) {
     spells: units(row.spells),
     clanCastle: units(row.clan_castle),
     heroes: units(row.heroes),
+    heroLoadouts: (row.hero_loadouts ?? []).map((loadout) => ({
+      hero: units([loadout.hero])[0],
+      pet: units([loadout.pet])[0],
+      equipment: units(loadout.equipment)
+    })),
     published: row.published,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -339,8 +353,9 @@ export class ContentController {
     if (kind === 'strategies') {
       const result = await pool.query(
         `
-        insert into content_strategies (title, town_hall, troops, spells, clan_castle, heroes, published)
-        values ($1, $2, $3, $4, $5, $6, $7)
+        insert into content_strategies
+          (title, town_hall, troops, spells, clan_castle, heroes, hero_loadouts, published)
+        values ($1, $2, $3, $4, $5, $6, $7, $8)
         returning *
         `,
         [
@@ -350,6 +365,7 @@ export class ContentController {
           JSON.stringify(payload.spells),
           JSON.stringify(payload.clanCastle),
           JSON.stringify(payload.heroes),
+          JSON.stringify(payload.heroLoadouts),
           payload.published
         ]
       );
@@ -478,7 +494,8 @@ export class ContentController {
         `
         update content_strategies
         set title = $2, town_hall = $3, troops = $4, spells = $5,
-            clan_castle = $6, heroes = $7, published = $8, updated_at = now()
+            clan_castle = $6, heroes = $7, hero_loadouts = $8,
+            published = $9, updated_at = now()
         where id = $1
         returning *
         `,
@@ -490,6 +507,7 @@ export class ContentController {
           JSON.stringify(next.spells),
           JSON.stringify(next.clanCastle),
           JSON.stringify(next.heroes),
+          JSON.stringify(next.heroLoadouts),
           next.published
         ]
       );
