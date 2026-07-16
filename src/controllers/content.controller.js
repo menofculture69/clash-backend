@@ -17,11 +17,11 @@ const armyCategories = [
   'heroEquipment'
 ];
 const socialHashtags = [
-  'Trophies',
-  'Town Hall Level',
-  'Donation',
-  'Clan Capital Contribution',
-  'War Stars'
+  'Casual',
+  'Suggestions',
+  'Recruitment',
+  'Need Help',
+  'Polls'
 ];
 const strategyUnitSchema = z
   .union([
@@ -47,7 +47,7 @@ const kindSchemas = {
     title: z.string().min(3).max(120),
     townHall: z.enum(townHalls),
     description: z.string().max(500).optional().default(''),
-    imageUrl: z.string().url().optional().default(''),
+    imageUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
     layoutUrl: z.string().url(),
     published: z.boolean().optional().default(true)
   }),
@@ -89,7 +89,7 @@ const uploadSchema = z.object({
 const publicPostSchema = z.object({
   playerTag: z.string().min(1),
   body: z.string().max(2000).optional().default(''),
-  imageUrl: z.string().url().optional().default(''),
+  imageUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
   pollQuestion: z.string().max(160).optional().nullable(),
   pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([]),
   hashtags: z.array(z.enum(socialHashtags)).max(5).optional().default([])

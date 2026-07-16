@@ -96,6 +96,21 @@ create table if not exists social_posts (
 alter table social_posts
   add column if not exists hashtags jsonb not null default '[]'::jsonb;
 
+update social_posts
+set hashtags = hashtags
+  - 'Trophies'
+  - 'Town Hall Level'
+  - 'Donation'
+  - 'Clan Capital Contribution'
+  - 'War Stars'
+where hashtags ?| array[
+  'Trophies',
+  'Town Hall Level',
+  'Donation',
+  'Clan Capital Contribution',
+  'War Stars'
+];
+
 alter table social_posts
   add column if not exists player_clan_name text,
   add column if not exists player_clan_role text;
