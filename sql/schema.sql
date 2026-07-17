@@ -153,6 +153,26 @@ create table if not exists social_post_comments (
 create index if not exists idx_social_post_comments_post_id
   on social_post_comments (post_id, created_at desc);
 
+create table if not exists social_follows (
+  follower_tag text not null,
+  following_tag text not null,
+  follower_name text not null,
+  follower_avatar_url text,
+  follower_clan_name text,
+  following_name text not null,
+  following_avatar_url text,
+  following_clan_name text,
+  created_at timestamptz not null default now(),
+  primary key (follower_tag, following_tag),
+  constraint social_follows_not_self check (follower_tag <> following_tag)
+);
+
+create index if not exists idx_social_follows_follower
+  on social_follows (follower_tag, created_at desc);
+
+create index if not exists idx_social_follows_following
+  on social_follows (following_tag, created_at desc);
+
 create table if not exists army_items (
   id uuid primary key default gen_random_uuid(),
   name text not null,

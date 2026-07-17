@@ -126,6 +126,11 @@ const commentSchema = z.object({
   body: z.string().min(1).max(500)
 });
 
+const followSchema = z.object({
+  followerTag: z.string().min(1),
+  followingTag: z.string().min(1)
+});
+
 function ensureKind(kind) {
   if (!kindSchemas[kind]) {
     throw new AppError('Unknown content type.', 404, true);
@@ -201,10 +206,24 @@ function mapPost(row) {
     likeCount: row.like_count,
     commentCount: row.comment_count,
     shareCount: row.share_count,
+    isFollowing: Boolean(row.is_following),
+    followerCount: Number(row.follower_count ?? 0),
+    followingCount: Number(row.following_count ?? 0),
     featured: row.featured,
     published: row.published,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function mapFollowPerson(row, prefix = '') {
+  const tag = row[`${prefix}tag`];
+  return {
+    playerTag: tag,
+    playerName: row[`${prefix}name`],
+    playerAvatarUrl: row[`${prefix}avatar_url`],
+    playerClanName: row[`${prefix}clan_name`],
+    createdAt: row.created_at
   };
 }
 
@@ -282,11 +301,40 @@ async function playerIdentity(playerTag) {
   };
 }
 
+async function followCounts(playerTag, viewerTag = null) {
+  const values = [playerTag];
+  const viewerIndex = viewerTag
+    ? (() => {
+        values.push(viewerTag);
+        return values.length;
+      })()
+    : null;
+  const result = await pool.query(
+    `
+    select
+      (select count(*)::int from social_follows where following_tag = $1) as follower_count,
+      (select count(*)::int from social_follows where follower_tag = $1) as following_count,
+      ${viewerIndex ? `exists (
+        select 1 from social_follows
+        where follower_tag = $${viewerIndex}
+          and following_tag = $1
+      )` : 'false'} as is_following
+    `,
+    values
+  );
+  return {
+    followerCount: Number(result.rows[0]?.follower_count ?? 0),
+    followingCount: Number(result.rows[0]?.following_count ?? 0),
+    isFollowing: Boolean(result.rows[0]?.is_following)
+  };
+}
+
 export class ContentController {
   async listPublic(req, res, kind) {
     ensureKind(kind);
     const townHall = req.query.townHall ? String(req.query.townHall).toUpperCase() : null;
     const featuredOnly = kind === 'posts' && req.query.feed === 'featured';
+    const followingOnly = kind === 'posts' && req.query.feed === 'following';
     const hashtag = kind === 'posts' && req.query.hashtag ? String(req.query.hashtag) : null;
 
     if (kind === 'layouts') {
@@ -345,15 +393,45 @@ export class ContentController {
       return res.json({ items: result.rows.map(mapHallAsset) });
     }
 
+    const viewerTag = req.query.playerTag ? normalizeTag(String(req.query.playerTag)) : null;
+    const values = [];
+    const filters = ['p.published = true'];
+    if (featuredOnly) filters.push('p.featured = true');
+    if (hashtag) {
+      values.push(JSON.stringify([hashtag]));
+      filters.push(`p.hashtags @> $${values.length}::jsonb`);
+    }
+    if (followingOnly) {
+      if (!viewerTag) return res.json({ items: [] });
+      values.push(viewerTag);
+      filters.push(`exists (
+        select 1 from social_follows sf
+        where sf.follower_tag = $${values.length}
+          and sf.following_tag = p.player_tag
+      )`);
+    }
+    const viewerIndex = viewerTag
+      ? (() => {
+          values.push(viewerTag);
+          return values.length;
+        })()
+      : null;
     const result = await pool.query(
       `
-      select * from social_posts
-      where published = true ${featuredOnly ? 'and featured = true' : ''}
-        ${hashtag ? "and hashtags @> $1::jsonb" : ''}
-      order by created_at desc
+      select p.*,
+        ${viewerIndex ? `exists (
+          select 1 from social_follows sf
+          where sf.follower_tag = $${viewerIndex}
+            and sf.following_tag = p.player_tag
+        )` : 'false'} as is_following,
+        (select count(*)::int from social_follows sf where sf.following_tag = p.player_tag) as follower_count,
+        (select count(*)::int from social_follows sf where sf.follower_tag = p.player_tag) as following_count
+      from social_posts p
+      where ${filters.join(' and ')}
+      order by p.created_at desc
       limit 100
       `,
-      hashtag ? [JSON.stringify([hashtag])] : []
+      values
     );
     return res.json({ items: result.rows.map(mapPost) });
   }
@@ -714,6 +792,100 @@ export class ContentController {
       [postId]
     );
     return res.json({ likeCount: result.rows[0]?.like_count ?? 0 });
+  }
+
+  async follow(req, res) {
+    const payload = followSchema.parse(req.body);
+    const follower = await playerIdentity(payload.followerTag);
+    const following = await playerIdentity(payload.followingTag);
+    if (follower.playerTag === following.playerTag) {
+      throw new AppError('You cannot follow yourself.', 400, true);
+    }
+
+    await pool.query(
+      `
+      insert into social_follows
+        (follower_tag, following_tag, follower_name, follower_avatar_url,
+         follower_clan_name, following_name, following_avatar_url, following_clan_name)
+      values ($1, $2, $3, $4, $5, $6, $7, $8)
+      on conflict (follower_tag, following_tag)
+      do update set
+        follower_name = excluded.follower_name,
+        follower_avatar_url = excluded.follower_avatar_url,
+        follower_clan_name = excluded.follower_clan_name,
+        following_name = excluded.following_name,
+        following_avatar_url = excluded.following_avatar_url,
+        following_clan_name = excluded.following_clan_name
+      `,
+      [
+        follower.playerTag,
+        following.playerTag,
+        follower.playerName,
+        follower.playerAvatarUrl,
+        follower.playerClanName,
+        following.playerName,
+        following.playerAvatarUrl,
+        following.playerClanName
+      ]
+    );
+
+    const counts = await followCounts(following.playerTag);
+    return res.status(201).json({ isFollowing: true, ...counts });
+  }
+
+  async unfollow(req, res) {
+    const payload = followSchema.parse(req.body);
+    const followerTag = normalizeTag(payload.followerTag);
+    const followingTag = normalizeTag(payload.followingTag);
+    await pool.query(
+      'delete from social_follows where follower_tag = $1 and following_tag = $2',
+      [followerTag, followingTag]
+    );
+    const counts = await followCounts(followingTag);
+    return res.json({ isFollowing: false, ...counts });
+  }
+
+  async followCounts(req, res) {
+    const playerTag = normalizeTag(String(req.query.playerTag ?? ''));
+    const viewerTag = req.query.viewerTag ? normalizeTag(String(req.query.viewerTag)) : null;
+    const counts = await followCounts(playerTag, viewerTag);
+    return res.json(counts);
+  }
+
+  async followList(req, res) {
+    const type = String(req.params.type);
+    if (!['followers', 'following'].includes(type)) {
+      throw new AppError('Unknown follow list.', 404, true);
+    }
+    const playerTag = normalizeTag(String(req.query.playerTag ?? ''));
+    const search = String(req.query.search ?? '').trim().toLowerCase();
+    const values = [playerTag];
+    const searchSql = search
+      ? (() => {
+          values.push(`%${search}%`);
+          return `and (
+            lower(${type === 'followers' ? 'follower_name' : 'following_name'}) like $${values.length}
+            or lower(${type === 'followers' ? 'follower_tag' : 'following_tag'}) like $${values.length}
+          )`;
+        })()
+      : '';
+    const result = await pool.query(
+      `
+      select
+        ${type === 'followers' ? 'follower_tag' : 'following_tag'} as tag,
+        ${type === 'followers' ? 'follower_name' : 'following_name'} as name,
+        ${type === 'followers' ? 'follower_avatar_url' : 'following_avatar_url'} as avatar_url,
+        ${type === 'followers' ? 'follower_clan_name' : 'following_clan_name'} as clan_name,
+        created_at
+      from social_follows
+      where ${type === 'followers' ? 'following_tag' : 'follower_tag'} = $1
+      ${searchSql}
+      order by created_at desc
+      limit 100
+      `,
+      values
+    );
+    return res.json({ items: result.rows.map((row) => mapFollowPerson(row)) });
   }
 
   async comment(req, res) {

@@ -13,6 +13,10 @@ contentRouter.post('/posts/:id/like', asyncHandler((req, res) => contentControll
 contentRouter.get('/posts/:id/comments', asyncHandler((req, res) => contentController.comments(req, res)));
 contentRouter.post('/posts/:id/comment', asyncHandler((req, res) => contentController.comment(req, res)));
 contentRouter.post('/posts/:id/share', asyncHandler((req, res) => contentController.share(req, res)));
+contentRouter.post('/follows', asyncHandler((req, res) => contentController.follow(req, res)));
+contentRouter.delete('/follows', asyncHandler((req, res) => contentController.unfollow(req, res)));
+contentRouter.get('/follows/counts', asyncHandler((req, res) => contentController.followCounts(req, res)));
+contentRouter.get('/follows/:type', asyncHandler((req, res) => contentController.followList(req, res)));
 contentRouter.post('/uploads/image', asyncHandler((req, res) => contentController.upload(req, res)));
 
 export const adminContentRouter = Router();
