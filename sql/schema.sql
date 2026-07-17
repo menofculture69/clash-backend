@@ -58,6 +58,7 @@ create table if not exists content_strategies (
   clan_castle jsonb not null default '[]'::jsonb,
   heroes jsonb not null default '[]'::jsonb,
   hero_loadouts jsonb not null default '[]'::jsonb,
+  army_link text not null default '',
   published boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -68,6 +69,9 @@ create index if not exists idx_content_strategies_public
 
 alter table content_strategies
   add column if not exists hero_loadouts jsonb not null default '[]'::jsonb;
+
+alter table content_strategies
+  add column if not exists army_link text not null default '';
 
 create table if not exists social_posts (
   id uuid primary key default gen_random_uuid(),
@@ -163,3 +167,16 @@ create table if not exists army_items (
 
 create index if not exists idx_army_items_lookup
   on army_items (normalized_name, category, village);
+
+create table if not exists hall_assets (
+  id uuid primary key default gen_random_uuid(),
+  hall_type text not null check (hall_type in ('townHall', 'builderHall')),
+  level integer not null check (level between 1 and 99),
+  image_url text not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (hall_type, level)
+);
+
+create index if not exists idx_hall_assets_lookup
+  on hall_assets (hall_type, level);

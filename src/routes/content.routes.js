@@ -5,7 +5,7 @@ import { requireAdmin } from '../middleware/admin.js';
 import { asyncHandler } from '../utils/async-handler.js';
 
 export const contentRouter = Router();
-const publicKinds = ['layouts', 'strategies', 'posts', 'army'];
+const publicKinds = ['layouts', 'strategies', 'posts', 'army', 'halls'];
 for (const kind of publicKinds) contentRouter.get(`/${kind}`, asyncHandler((req, res) => contentController.listPublic(req, res, kind)));
 contentRouter.get('/notifications', asyncHandler((req, res) => contentController.notifications(req, res)));
 contentRouter.post('/posts', asyncHandler((req, res) => contentController.createPublicPost(req, res)));

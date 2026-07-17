@@ -20,9 +20,11 @@ export class ClanAggregateService {
       clashService.getClanCurrentWar(clanTag)
     ]);
 
+    const enrichedMembers = await this.enrichMembers(members);
+
     const fullPayload = {
       profile,
-      members,
+      members: enrichedMembers,
       warLog,
       capitalRaidSeasons,
       currentWar,
@@ -30,6 +32,34 @@ export class ClanAggregateService {
     };
     clanCache.set(cacheKey, fullPayload);
     return fullPayload;
+  }
+
+  async enrichMembers(members) {
+    const enriched = [];
+    for (let index = 0; index < members.length; index += 8) {
+      const batch = members.slice(index, index + 8);
+      const profiles = await Promise.allSettled(
+        batch.map((member) => clashService.getPlayer(member.tag))
+      );
+
+      profiles.forEach((result, batchIndex) => {
+        const member = batch[batchIndex];
+        if (result.status !== 'fulfilled') {
+          enriched.push(member);
+          return;
+        }
+        const profile = result.value;
+        enriched.push({
+          ...member,
+          townHallLevel: profile.townHallLevel ?? member.townHallLevel ?? 0,
+          townHallWeaponLevel: profile.townHallWeaponLevel ?? member.townHallWeaponLevel ?? 0,
+          expLevel: profile.expLevel ?? member.expLevel ?? 0,
+          leagueTier: profile.leagueTier ?? member.leagueTier,
+          league: profile.league ?? member.league
+        });
+      });
+    }
+    return enriched;
   }
 }
 

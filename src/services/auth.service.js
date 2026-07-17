@@ -14,14 +14,16 @@ export class AuthService {
       await clashService.verifyPlayerToken(playerTag, input.verifyToken);
       const player = await clashService.getPlayer(playerTag);
       const clan = player.clan ?? {};
+      const leagueTier = player.leagueTier ?? {};
       const league = player.league ?? {};
+      const tierIconUrls = leagueTier.iconUrls ?? {};
       const iconUrls = league.iconUrls ?? {};
       const user = await userRepository.upsertUser({
         playerTag,
         playerName: String(player.name ?? ''),
         clanTag: clan.tag ?? null,
         clanName: clan.name ?? null,
-        avatarUrl: iconUrls.medium ?? iconUrls.small ?? null
+        avatarUrl: tierIconUrls.small ?? tierIconUrls.large ?? iconUrls.medium ?? iconUrls.small ?? null
       });
       const refreshTokenValue = uuid();
       const refreshTokenHash = hashToken(refreshTokenValue);

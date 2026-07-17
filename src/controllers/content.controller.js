@@ -23,6 +23,7 @@ const socialHashtags = [
   'Need Help',
   'Polls'
 ];
+const hallTypes = ['townHall', 'builderHall'];
 const strategyUnitSchema = z
   .union([
     z.string().min(1).max(120),
@@ -42,6 +43,13 @@ const heroLoadoutSchema = z.object({
   (loadout) => new Set(loadout.equipment.map((item) => item.name)).size === 2,
   { message: 'Each hero must use two different equipment items.', path: ['equipment'] }
 );
+const armyLinkSchema = z.union([
+  z.literal(''),
+  z.string().url().refine((value) => {
+    const url = new URL(value);
+    return url.hostname === 'link.clashofclans.com' && url.searchParams.get('action') === 'CopyArmy';
+  }, 'Use an official Clash of Clans CopyArmy link.')
+]);
 const kindSchemas = {
   layouts: z.object({
     title: z.string().min(3).max(120),
@@ -58,7 +66,20 @@ const kindSchemas = {
     spells: z.array(strategyUnitSchema).optional().default([]),
     clanCastle: z.array(strategyUnitSchema).optional().default([]),
     heroes: z.array(strategyUnitSchema).optional().default([]),
-    heroLoadouts: z.array(heroLoadoutSchema).max(4).optional().default([]),
+    heroLoadouts: z
+      .array(heroLoadoutSchema)
+      .max(4)
+      .refine(
+        (loadouts) => new Set(loadouts.map((item) => item.hero.name)).size === loadouts.length,
+        'A hero can only be selected once.'
+      )
+      .refine(
+        (loadouts) => new Set(loadouts.map((item) => item.pet.name)).size === loadouts.length,
+        'Each hero must use a different pet.'
+      )
+      .optional()
+      .default([]),
+    armyLink: armyLinkSchema.optional().default(''),
     published: z.boolean().optional().default(true)
   }),
   posts: z.object({
@@ -77,6 +98,11 @@ const kindSchemas = {
     name: z.string().min(1).max(120),
     category: z.enum(armyCategories),
     village: z.enum(['home', 'builderBase']),
+    imageUrl: z.string().url()
+  }),
+  halls: z.object({
+    hallType: z.enum(hallTypes),
+    level: z.coerce.number().int().min(1).max(99),
     imageUrl: z.string().url()
   })
 };
@@ -150,6 +176,7 @@ function mapStrategy(row) {
       pet: units([loadout.pet])[0],
       equipment: units(loadout.equipment)
     })),
+    armyLink: row.army_link ?? '',
     published: row.published,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -216,10 +243,26 @@ function mapArmyItem(row) {
   };
 }
 
+function mapHallAsset(row) {
+  return {
+    id: row.id,
+    hallType: row.hall_type,
+    level: row.level,
+    imageUrl: row.image_url,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 async function playerIdentity(playerTag) {
   const normalizedTag = normalizeTag(playerTag);
   const player = await clashService.getPlayer(normalizedTag);
-  const leagueIcon = player.league?.iconUrls?.medium ?? player.league?.iconUrls?.small ?? null;
+  const leagueIcon =
+    player.leagueTier?.iconUrls?.small ??
+    player.leagueTier?.iconUrls?.large ??
+    player.league?.iconUrls?.medium ??
+    player.league?.iconUrls?.small ??
+    null;
   let clanRole = null;
   if (player.clan?.tag) {
     try {
@@ -288,6 +331,20 @@ export class ContentController {
       return res.json({ items: result.rows.map(mapArmyItem) });
     }
 
+    if (kind === 'halls') {
+      const hallType = req.query.hallType ? String(req.query.hallType) : null;
+      const values = hallType ? [hallType] : [];
+      const result = await pool.query(
+        `
+        select * from hall_assets
+        ${hallType ? 'where hall_type = $1' : ''}
+        order by hall_type asc, level desc
+        `,
+        values
+      );
+      return res.json({ items: result.rows.map(mapHallAsset) });
+    }
+
     const result = await pool.query(
       `
       select * from social_posts
@@ -322,6 +379,13 @@ export class ContentController {
       return res.json({ items: result.rows.map(mapArmyItem) });
     }
 
+    if (kind === 'halls') {
+      const result = await pool.query(
+        'select * from hall_assets order by hall_type asc, level desc'
+      );
+      return res.json({ items: result.rows.map(mapHallAsset) });
+    }
+
     const result = await pool.query('select * from social_posts order by created_at desc');
     return res.json({ items: result.rows.map(mapPost) });
   }
@@ -354,8 +418,8 @@ export class ContentController {
       const result = await pool.query(
         `
         insert into content_strategies
-          (title, town_hall, troops, spells, clan_castle, heroes, hero_loadouts, published)
-        values ($1, $2, $3, $4, $5, $6, $7, $8)
+          (title, town_hall, troops, spells, clan_castle, heroes, hero_loadouts, army_link, published)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         returning *
         `,
         [
@@ -366,6 +430,7 @@ export class ContentController {
           JSON.stringify(payload.clanCastle),
           JSON.stringify(payload.heroes),
           JSON.stringify(payload.heroLoadouts),
+          payload.armyLink,
           payload.published
         ]
       );
@@ -393,6 +458,22 @@ export class ContentController {
         ]
       );
       return res.status(201).json(mapArmyItem(result.rows[0]));
+    }
+
+    if (kind === 'halls') {
+      const result = await pool.query(
+        `
+        insert into hall_assets (hall_type, level, image_url)
+        values ($1, $2, $3)
+        on conflict (hall_type, level)
+        do update set
+          image_url = excluded.image_url,
+          updated_at = now()
+        returning *
+        `,
+        [payload.hallType, payload.level, payload.imageUrl]
+      );
+      return res.status(201).json(mapHallAsset(result.rows[0]));
     }
 
     const identity = payload.playerTag
@@ -495,7 +576,7 @@ export class ContentController {
         update content_strategies
         set title = $2, town_hall = $3, troops = $4, spells = $5,
             clan_castle = $6, heroes = $7, hero_loadouts = $8,
-            published = $9, updated_at = now()
+            army_link = $9, published = $10, updated_at = now()
         where id = $1
         returning *
         `,
@@ -508,6 +589,7 @@ export class ContentController {
           JSON.stringify(next.clanCastle),
           JSON.stringify(next.heroes),
           JSON.stringify(next.heroLoadouts),
+          next.armyLink,
           next.published
         ]
       );
@@ -538,6 +620,22 @@ export class ContentController {
       return res.json(mapArmyItem(result.rows[0]));
     }
 
+    if (kind === 'halls') {
+      const current = await pool.query('select * from hall_assets where id = $1', [id]);
+      if (!current.rows[0]) throw new AppError('Content not found.', 404, true);
+      const next = { ...mapHallAsset(current.rows[0]), ...payload };
+      const result = await pool.query(
+        `
+        update hall_assets
+        set hall_type = $2, level = $3, image_url = $4, updated_at = now()
+        where id = $1
+        returning *
+        `,
+        [id, next.hallType, next.level, next.imageUrl]
+      );
+      return res.json(mapHallAsset(result.rows[0]));
+    }
+
     throw new AppError('Post updates are not supported from this route yet.', 400, true);
   }
 
@@ -552,7 +650,9 @@ export class ContentController {
           ? 'content_strategies'
           : kind === 'army'
             ? 'army_items'
-            : 'social_posts';
+            : kind === 'halls'
+              ? 'hall_assets'
+              : 'social_posts';
     if (kind === 'posts') {
       const current = await pool.query('select * from social_posts where id = $1', [id]);
       if (current.rows[0]) {
