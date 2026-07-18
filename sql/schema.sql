@@ -53,12 +53,16 @@ create table if not exists content_announcements (
   id uuid primary key default gen_random_uuid(),
   title text not null default 'Clash Companion',
   message text not null,
+  image_url text not null default '',
   link_label text not null default '',
   link_url text not null default '',
   published boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table content_announcements
+  add column if not exists image_url text not null default '';
 
 create index if not exists idx_content_announcements_public
   on content_announcements (published, created_at desc);

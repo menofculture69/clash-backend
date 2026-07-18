@@ -62,6 +62,7 @@ const kindSchemas = {
   announcements: z.object({
     title: z.string().min(2).max(120).optional().default('Clash Companion'),
     message: z.string().min(1).max(1200),
+    imageUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
     linkLabel: z.string().max(80).optional().default(''),
     linkUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
     published: z.boolean().optional().default(true)
@@ -180,6 +181,7 @@ function mapAnnouncement(row) {
     id: row.id,
     title: row.title,
     message: row.message,
+    imageUrl: row.image_url,
     linkLabel: row.link_label,
     linkUrl: row.link_url,
     published: row.published,
@@ -601,13 +603,14 @@ export class ContentController {
     if (kind === 'announcements') {
       const result = await pool.query(
         `
-        insert into content_announcements (title, message, link_label, link_url, published)
-        values ($1, $2, $3, $4, $5)
+        insert into content_announcements (title, message, image_url, link_label, link_url, published)
+        values ($1, $2, $3, $4, $5, $6)
         returning *
         `,
         [
           payload.title,
           payload.message,
+          payload.imageUrl,
           payload.linkLabel,
           payload.linkUrl,
           payload.published
@@ -776,8 +779,8 @@ export class ContentController {
       const result = await pool.query(
         `
         update content_announcements
-        set title = $2, message = $3, link_label = $4, link_url = $5,
-            published = $6, updated_at = now()
+        set title = $2, message = $3, image_url = $4, link_label = $5,
+            link_url = $6, published = $7, updated_at = now()
         where id = $1
         returning *
         `,
@@ -785,6 +788,7 @@ export class ContentController {
           id,
           next.title,
           next.message,
+          next.imageUrl,
           next.linkLabel,
           next.linkUrl,
           next.published
