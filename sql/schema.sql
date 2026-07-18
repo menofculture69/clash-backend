@@ -49,6 +49,20 @@ create table if not exists content_layouts (
 create index if not exists idx_content_layouts_public
   on content_layouts (town_hall, published, created_at desc);
 
+create table if not exists content_announcements (
+  id uuid primary key default gen_random_uuid(),
+  title text not null default 'Clash Companion',
+  message text not null,
+  link_label text not null default '',
+  link_url text not null default '',
+  published boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_content_announcements_public
+  on content_announcements (published, created_at desc);
+
 create table if not exists content_strategies (
   id uuid primary key default gen_random_uuid(),
   title text not null,
@@ -152,6 +166,19 @@ create table if not exists social_post_comments (
 
 create index if not exists idx_social_post_comments_post_id
   on social_post_comments (post_id, created_at desc);
+
+create table if not exists social_post_reports (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references social_posts(id) on delete cascade,
+  reporter_tag text not null,
+  reporter_name text,
+  reason text not null default 'Reported from app',
+  created_at timestamptz not null default now(),
+  unique (post_id, reporter_tag)
+);
+
+create index if not exists idx_social_post_reports_recent
+  on social_post_reports (created_at desc);
 
 create table if not exists social_follows (
   follower_tag text not null,

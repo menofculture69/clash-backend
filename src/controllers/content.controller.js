@@ -59,6 +59,13 @@ const kindSchemas = {
     layoutUrl: z.string().url(),
     published: z.boolean().optional().default(true)
   }),
+  announcements: z.object({
+    title: z.string().min(2).max(120).optional().default('Clash Companion'),
+    message: z.string().min(1).max(1200),
+    linkLabel: z.string().max(80).optional().default(''),
+    linkUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
+    published: z.boolean().optional().default(true)
+  }),
   strategies: z.object({
     title: z.string().min(3).max(120),
     townHall: z.enum(townHalls),
@@ -131,6 +138,11 @@ const followSchema = z.object({
   followingTag: z.string().min(1)
 });
 
+const reportSchema = z.object({
+  playerTag: z.string().min(1),
+  reason: z.string().max(300).optional().default('Reported from app')
+});
+
 function ensureKind(kind) {
   if (!kindSchemas[kind]) {
     throw new AppError('Unknown content type.', 404, true);
@@ -157,6 +169,19 @@ function mapLayout(row) {
     description: row.description,
     imageUrl: row.image_url,
     layoutUrl: row.layout_url,
+    published: row.published,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapAnnouncement(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    message: row.message,
+    linkLabel: row.link_label,
+    linkUrl: row.link_url,
     published: row.published,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -246,6 +271,39 @@ function mapComment(row) {
     playerName: row.player_name,
     body: row.body,
     createdAt: row.created_at
+  };
+}
+
+function mapReport(row) {
+  return {
+    id: row.id,
+    postId: row.post_id,
+    reporterTag: row.reporter_tag,
+    reporterName: row.reporter_name,
+    reason: row.reason,
+    createdAt: row.created_at,
+    post: row.post_id
+      ? {
+          id: row.post_id,
+          playerTag: row.post_player_tag,
+          playerName: row.post_player_name,
+          playerAvatarUrl: row.post_player_avatar_url,
+          playerClanName: row.post_player_clan_name,
+          playerClanRole: row.post_player_clan_role,
+          body: row.post_body,
+          imageUrl: row.post_image_url,
+          pollQuestion: row.post_poll_question,
+          pollOptions: row.post_poll_options ?? [],
+          hashtags: row.post_hashtags ?? [],
+          likeCount: row.post_like_count,
+          commentCount: row.post_comment_count,
+          shareCount: row.post_share_count,
+          featured: row.post_featured,
+          published: row.post_published,
+          createdAt: row.post_created_at,
+          updatedAt: row.post_updated_at
+        }
+      : null
   };
 }
 
@@ -351,6 +409,18 @@ export class ContentController {
       return res.json({ items: result.rows.map(mapLayout) });
     }
 
+    if (kind === 'announcements') {
+      const result = await pool.query(
+        `
+        select * from content_announcements
+        where published = true
+        order by created_at desc
+        limit 50
+        `
+      );
+      return res.json({ items: result.rows.map(mapAnnouncement) });
+    }
+
     if (kind === 'strategies') {
       const values = townHall ? [townHall] : [];
       const result = await pool.query(
@@ -438,11 +508,47 @@ export class ContentController {
 
   async listAdmin(req, res) {
     const kind = String(req.params.kind);
+    if (kind === 'reports') {
+      const result = await pool.query(
+        `
+        select
+          r.*,
+          p.id as post_id,
+          p.player_tag as post_player_tag,
+          p.player_name as post_player_name,
+          p.player_avatar_url as post_player_avatar_url,
+          p.player_clan_name as post_player_clan_name,
+          p.player_clan_role as post_player_clan_role,
+          p.body as post_body,
+          p.image_url as post_image_url,
+          p.poll_question as post_poll_question,
+          p.poll_options as post_poll_options,
+          p.hashtags as post_hashtags,
+          p.like_count as post_like_count,
+          p.comment_count as post_comment_count,
+          p.share_count as post_share_count,
+          p.featured as post_featured,
+          p.published as post_published,
+          p.created_at as post_created_at,
+          p.updated_at as post_updated_at
+        from social_post_reports r
+        left join social_posts p on p.id = r.post_id
+        order by r.created_at desc
+        limit 200
+        `
+      );
+      return res.json({ items: result.rows.map(mapReport) });
+    }
     ensureKind(kind);
 
     if (kind === 'layouts') {
       const result = await pool.query('select * from content_layouts order by created_at desc');
       return res.json({ items: result.rows.map(mapLayout) });
+    }
+
+    if (kind === 'announcements') {
+      const result = await pool.query('select * from content_announcements order by created_at desc');
+      return res.json({ items: result.rows.map(mapAnnouncement) });
     }
 
     if (kind === 'strategies') {
@@ -490,6 +596,24 @@ export class ContentController {
         ]
       );
       return res.status(201).json(mapLayout(result.rows[0]));
+    }
+
+    if (kind === 'announcements') {
+      const result = await pool.query(
+        `
+        insert into content_announcements (title, message, link_label, link_url, published)
+        values ($1, $2, $3, $4, $5)
+        returning *
+        `,
+        [
+          payload.title,
+          payload.message,
+          payload.linkLabel,
+          payload.linkUrl,
+          payload.published
+        ]
+      );
+      return res.status(201).json(mapAnnouncement(result.rows[0]));
     }
 
     if (kind === 'strategies') {
@@ -645,6 +769,30 @@ export class ContentController {
       return res.json(mapLayout(result.rows[0]));
     }
 
+    if (kind === 'announcements') {
+      const current = await pool.query('select * from content_announcements where id = $1', [id]);
+      if (!current.rows[0]) throw new AppError('Content not found.', 404, true);
+      const next = { ...mapAnnouncement(current.rows[0]), ...payload };
+      const result = await pool.query(
+        `
+        update content_announcements
+        set title = $2, message = $3, link_label = $4, link_url = $5,
+            published = $6, updated_at = now()
+        where id = $1
+        returning *
+        `,
+        [
+          id,
+          next.title,
+          next.message,
+          next.linkLabel,
+          next.linkUrl,
+          next.published
+        ]
+      );
+      return res.json(mapAnnouncement(result.rows[0]));
+    }
+
     if (kind === 'strategies') {
       const current = await pool.query('select * from content_strategies where id = $1', [id]);
       if (!current.rows[0]) throw new AppError('Content not found.', 404, true);
@@ -719,18 +867,25 @@ export class ContentController {
 
   async remove(req, res) {
     const kind = String(req.params.kind);
+    if (kind === 'reports') {
+      const id = toUuid(req.params.id);
+      await pool.query('delete from social_post_reports where id = $1', [id]);
+      return res.status(204).send();
+    }
     ensureKind(kind);
     const id = toUuid(req.params.id);
     const table =
       kind === 'layouts'
         ? 'content_layouts'
-        : kind === 'strategies'
-          ? 'content_strategies'
-          : kind === 'army'
-            ? 'army_items'
-            : kind === 'halls'
-              ? 'hall_assets'
-              : 'social_posts';
+        : kind === 'announcements'
+          ? 'content_announcements'
+          : kind === 'strategies'
+            ? 'content_strategies'
+            : kind === 'army'
+              ? 'army_items'
+              : kind === 'halls'
+                ? 'hall_assets'
+                : 'social_posts';
     if (kind === 'posts') {
       const current = await pool.query('select * from social_posts where id = $1', [id]);
       if (current.rows[0]) {
@@ -909,6 +1064,37 @@ export class ContentController {
       [postId]
     );
     return res.status(201).json(mapComment(comment.rows[0]));
+  }
+
+  async report(req, res) {
+    const postId = toUuid(req.params.id);
+    const payload = reportSchema.parse(req.body);
+    const identity = await playerIdentity(payload.playerTag);
+    const post = await pool.query(
+      'select id from social_posts where id = $1 and published = true',
+      [postId]
+    );
+    if (!post.rows[0]) {
+      throw new AppError('Post not found.', 404, true);
+    }
+
+    const result = await pool.query(
+      `
+      insert into social_post_reports (post_id, reporter_tag, reporter_name, reason)
+      values ($1, $2, $3, $4)
+      on conflict (post_id, reporter_tag)
+      do update set
+        reporter_name = excluded.reporter_name,
+        reason = excluded.reason,
+        created_at = now()
+      returning *
+      `,
+      [postId, identity.playerTag, identity.playerName, payload.reason]
+    );
+    return res.status(201).json({
+      message: 'Thanks for reporting this post.',
+      report: mapReport(result.rows[0])
+    });
   }
 
   async comments(req, res) {
