@@ -50,6 +50,19 @@ const armyLinkSchema = z.union([
     return url.hostname === 'link.clashofclans.com' && url.searchParams.get('action') === 'CopyArmy';
   }, 'Use an official Clash of Clans CopyArmy link.')
 ]);
+const optionalWebUrlSchema = z.preprocess(
+  (value) => {
+    const input = String(value ?? '').trim();
+    if (!input) return '';
+    return /^https?:\/\//i.test(input) ? input : `https://${input}`;
+  },
+  z.union([
+    z.literal(''),
+    z.string().url().refine((value) => ['http:', 'https:'].includes(new URL(value).protocol), {
+      message: 'Link URL must use http or https.'
+    })
+  ])
+);
 const kindSchemas = {
   layouts: z.object({
     title: z.string().min(3).max(120),
@@ -64,7 +77,9 @@ const kindSchemas = {
     message: z.string().min(1).max(1200),
     imageUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
     linkLabel: z.string().max(80).optional().default(''),
-    linkUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
+    linkUrl: optionalWebUrlSchema.optional().default(''),
+    pollQuestion: z.string().max(160).optional().nullable(),
+    pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([]),
     published: z.boolean().optional().default(true)
   }),
   strategies: z.object({
@@ -144,9 +159,28 @@ const reportSchema = z.object({
   reason: z.string().max(300).optional().default('Reported from app')
 });
 
+const announcementReactionSchema = z.object({
+  reaction: z.enum(['like', 'love', 'laugh', 'wow', 'sad', 'support'])
+});
+
+const announcementVoteSchema = z.object({
+  optionIndex: z.coerce.number().int().min(0).max(5)
+});
+
 function ensureKind(kind) {
   if (!kindSchemas[kind]) {
     throw new AppError('Unknown content type.', 404, true);
+  }
+}
+
+function ensureAnnouncementPoll(value) {
+  if (value.pollQuestion && (value.pollOptions ?? []).length < 2) {
+    throw new AppError('A poll needs at least two options.', 400, true);
+  }
+  const hasLabel = Boolean(value.linkLabel?.trim());
+  const hasUrl = Boolean(value.linkUrl?.trim());
+  if (hasLabel !== hasUrl) {
+    throw new AppError('Add both link button text and link URL, or leave both blank.', 400, true);
   }
 }
 
@@ -184,6 +218,12 @@ function mapAnnouncement(row) {
     imageUrl: row.image_url,
     linkLabel: row.link_label,
     linkUrl: row.link_url,
+    pollQuestion: row.poll_question,
+    pollOptions: row.poll_options ?? [],
+    reactionCounts: row.reaction_counts ?? {},
+    viewerReaction: row.viewer_reaction ?? null,
+    pollResults: row.poll_results ?? [],
+    viewerVote: row.viewer_vote == null ? null : Number(row.viewer_vote),
     published: row.published,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -412,13 +452,26 @@ export class ContentController {
     }
 
     if (kind === 'announcements') {
+      const viewerTag = req.query.playerTag ? normalizeTag(String(req.query.playerTag)) : null;
       const result = await pool.query(
         `
-        select * from content_announcements
-        where published = true
-        order by created_at desc
+        select a.*,
+          coalesce((select jsonb_object_agg(x.reaction, x.total) from (
+            select reaction, count(*)::int as total from announcement_reactions
+            where announcement_id = a.id group by reaction
+          ) x), '{}'::jsonb) as reaction_counts,
+          (select ar.reaction from announcement_reactions ar join app_users u on u.id = ar.user_id
+            where ar.announcement_id = a.id and u.player_tag = $1) as viewer_reaction,
+          coalesce((select jsonb_agg((select count(*)::int from announcement_poll_votes v where v.announcement_id = a.id and v.option_index = i) order by i)
+            from generate_series(0, jsonb_array_length(a.poll_options) - 1) i), '[]'::jsonb) as poll_results,
+          (select av.option_index from announcement_poll_votes av join app_users u on u.id = av.user_id
+            where av.announcement_id = a.id and u.player_tag = $1) as viewer_vote
+        from content_announcements a
+        where a.published = true
+        order by a.created_at desc
         limit 50
-        `
+        `,
+        [viewerTag]
       );
       return res.json({ items: result.rows.map(mapAnnouncement) });
     }
@@ -541,6 +594,29 @@ export class ContentController {
       );
       return res.json({ items: result.rows.map(mapReport) });
     }
+    if (kind === 'users') {
+      const result = await pool.query(`
+        select u.*,
+          (select max(created_at) from auth_audit_logs where player_tag = u.player_tag and success = true) as last_login_at,
+          (select max(coalesce(last_used_at, created_at)) from app_sessions where user_id = u.id) as last_active_at,
+          (select count(*)::int from app_sessions where user_id = u.id) as session_count,
+          (select count(*)::int from app_sessions where user_id = u.id and revoked_at is null and expires_at > now()) as active_session_count,
+          (select count(*)::int from auth_audit_logs where player_tag = u.player_tag and success = false) as failed_login_count,
+          (select device_info from app_sessions where user_id = u.id order by coalesce(last_used_at, created_at) desc limit 1) as latest_device
+        from app_users u order by coalesce(
+          (select max(created_at) from auth_audit_logs where player_tag = u.player_tag and success = true),
+          u.created_at
+        ) desc limit 1000
+      `);
+      return res.json({ items: result.rows.map((row) => ({
+        id: row.id, playerTag: row.player_tag, playerName: row.player_name,
+        clanTag: row.clan_tag, clanName: row.clan_name, avatarUrl: row.avatar_url,
+        createdAt: row.created_at, updatedAt: row.updated_at,
+        lastLoginAt: row.last_login_at, lastActiveAt: row.last_active_at,
+        sessionCount: Number(row.session_count ?? 0), activeSessionCount: Number(row.active_session_count ?? 0),
+        failedLoginCount: Number(row.failed_login_count ?? 0), latestDevice: row.latest_device
+      })) });
+    }
     ensureKind(kind);
 
     if (kind === 'layouts') {
@@ -549,7 +625,11 @@ export class ContentController {
     }
 
     if (kind === 'announcements') {
-      const result = await pool.query('select * from content_announcements order by created_at desc');
+      const result = await pool.query(`select a.*,
+        coalesce((select jsonb_object_agg(x.reaction, x.total) from (select reaction, count(*)::int total from announcement_reactions where announcement_id = a.id group by reaction) x), '{}'::jsonb) reaction_counts,
+        coalesce((select jsonb_agg((select count(*)::int from announcement_poll_votes v where v.announcement_id = a.id and v.option_index = i) order by i)
+          from generate_series(0, jsonb_array_length(a.poll_options) - 1) i), '[]'::jsonb) poll_results
+        from content_announcements a order by a.created_at desc`);
       return res.json({ items: result.rows.map(mapAnnouncement) });
     }
 
@@ -601,10 +681,11 @@ export class ContentController {
     }
 
     if (kind === 'announcements') {
+      ensureAnnouncementPoll(payload);
       const result = await pool.query(
         `
-        insert into content_announcements (title, message, image_url, link_label, link_url, published)
-        values ($1, $2, $3, $4, $5, $6)
+        insert into content_announcements (title, message, image_url, link_label, link_url, poll_question, poll_options, published)
+        values ($1, $2, $3, $4, $5, $6, $7, $8)
         returning *
         `,
         [
@@ -613,6 +694,8 @@ export class ContentController {
           payload.imageUrl,
           payload.linkLabel,
           payload.linkUrl,
+          payload.pollQuestion || null,
+          JSON.stringify(payload.pollOptions),
           payload.published
         ]
       );
@@ -776,11 +859,12 @@ export class ContentController {
       const current = await pool.query('select * from content_announcements where id = $1', [id]);
       if (!current.rows[0]) throw new AppError('Content not found.', 404, true);
       const next = { ...mapAnnouncement(current.rows[0]), ...payload };
+      ensureAnnouncementPoll(next);
       const result = await pool.query(
         `
         update content_announcements
         set title = $2, message = $3, image_url = $4, link_label = $5,
-            link_url = $6, published = $7, updated_at = now()
+            link_url = $6, poll_question = $7, poll_options = $8, published = $9, updated_at = now()
         where id = $1
         returning *
         `,
@@ -791,6 +875,8 @@ export class ContentController {
           next.imageUrl,
           next.linkLabel,
           next.linkUrl,
+          next.pollQuestion || null,
+          JSON.stringify(next.pollOptions ?? []),
           next.published
         ]
       );
@@ -867,6 +953,36 @@ export class ContentController {
     }
 
     throw new AppError('Post updates are not supported from this route yet.', 400, true);
+  }
+
+  async reactToAnnouncement(req, res) {
+    const announcementId = toUuid(req.params.id);
+    const { reaction } = announcementReactionSchema.parse(req.body);
+    const userId = req.auth.sub;
+    const existing = await pool.query(
+      'select reaction from announcement_reactions where announcement_id = $1 and user_id = $2',
+      [announcementId, userId]
+    );
+    if (existing.rows[0]?.reaction === reaction) {
+      await pool.query('delete from announcement_reactions where announcement_id = $1 and user_id = $2', [announcementId, userId]);
+    } else {
+      await pool.query(`insert into announcement_reactions (announcement_id, user_id, reaction)
+        values ($1, $2, $3) on conflict (announcement_id, user_id)
+        do update set reaction = excluded.reaction, updated_at = now()`, [announcementId, userId, reaction]);
+    }
+    return res.json({ success: true });
+  }
+
+  async voteAnnouncementPoll(req, res) {
+    const announcementId = toUuid(req.params.id);
+    const { optionIndex } = announcementVoteSchema.parse(req.body);
+    const announcement = await pool.query('select poll_options from content_announcements where id = $1 and published = true', [announcementId]);
+    if (!announcement.rows[0]) throw new AppError('Announcement not found.', 404, true);
+    if (optionIndex >= (announcement.rows[0].poll_options ?? []).length) throw new AppError('Invalid poll option.', 400, true);
+    await pool.query(`insert into announcement_poll_votes (announcement_id, user_id, option_index)
+      values ($1, $2, $3) on conflict (announcement_id, user_id)
+      do update set option_index = excluded.option_index, updated_at = now()`, [announcementId, req.auth.sub, optionIndex]);
+    return res.json({ success: true });
   }
 
   async remove(req, res) {

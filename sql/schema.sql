@@ -64,8 +64,36 @@ create table if not exists content_announcements (
 alter table content_announcements
   add column if not exists image_url text not null default '';
 
+alter table content_announcements
+  add column if not exists poll_question text,
+  add column if not exists poll_options jsonb not null default '[]'::jsonb;
+
 create index if not exists idx_content_announcements_public
   on content_announcements (published, created_at desc);
+
+create table if not exists announcement_reactions (
+  announcement_id uuid not null references content_announcements(id) on delete cascade,
+  user_id uuid not null references app_users(id) on delete cascade,
+  reaction text not null check (reaction in ('like', 'love', 'laugh', 'wow', 'sad', 'support')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (announcement_id, user_id)
+);
+
+create index if not exists idx_announcement_reactions_announcement
+  on announcement_reactions (announcement_id);
+
+create table if not exists announcement_poll_votes (
+  announcement_id uuid not null references content_announcements(id) on delete cascade,
+  user_id uuid not null references app_users(id) on delete cascade,
+  option_index integer not null check (option_index between 0 and 5),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (announcement_id, user_id)
+);
+
+create index if not exists idx_announcement_poll_votes_announcement
+  on announcement_poll_votes (announcement_id);
 
 create table if not exists content_strategies (
   id uuid primary key default gen_random_uuid(),

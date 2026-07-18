@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { contentController } from '../controllers/content.controller.js';
 import { requireAdmin } from '../middleware/admin.js';
+import { requireAuth } from '../middleware/auth.js';
 import { asyncHandler } from '../utils/async-handler.js';
 
 export const contentRouter = Router();
@@ -9,6 +10,8 @@ const publicKinds = ['layouts', 'announcements', 'strategies', 'posts', 'army', 
 for (const kind of publicKinds) contentRouter.get(`/${kind}`, asyncHandler((req, res) => contentController.listPublic(req, res, kind)));
 contentRouter.get('/notifications', asyncHandler((req, res) => contentController.notifications(req, res)));
 contentRouter.post('/posts', asyncHandler((req, res) => contentController.createPublicPost(req, res)));
+contentRouter.post('/announcements/:id/reaction', requireAuth, asyncHandler((req, res) => contentController.reactToAnnouncement(req, res)));
+contentRouter.post('/announcements/:id/vote', requireAuth, asyncHandler((req, res) => contentController.voteAnnouncementPoll(req, res)));
 contentRouter.post('/posts/:id/like', asyncHandler((req, res) => contentController.like(req, res)));
 contentRouter.get('/posts/:id/comments', asyncHandler((req, res) => contentController.comments(req, res)));
 contentRouter.post('/posts/:id/comment', asyncHandler((req, res) => contentController.comment(req, res)));
