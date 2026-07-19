@@ -10,12 +10,12 @@ export const globalRateLimit = rateLimit({
 });
 
 export const authRateLimit = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: env.AUTH_RATE_LIMIT_MAX,
+  windowMs: 5 * 60 * 1000,
+  max: Math.max(env.AUTH_RATE_LIMIT_MAX, 30),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    message: 'Too many authentication attempts. Please try again later.'
+    message: 'Please wait a few minutes before trying again.'
   }
 });
 

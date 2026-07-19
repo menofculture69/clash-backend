@@ -111,7 +111,7 @@ const kindSchemas = {
     authorName: z.string().min(2).max(60).optional(),
     authorRole: z.string().max(60).optional(),
     body: z.string().max(2000).optional().default(''),
-    imageUrl: z.string().url().optional().default(''),
+    imageUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
     pollQuestion: z.string().max(160).optional().nullable(),
     pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([]),
     hashtags: z.array(z.enum(socialHashtags)).max(5).optional().default([]),
@@ -281,6 +281,13 @@ function mapStrategy(row) {
 }
 
 function mapPost(row) {
+  const normalizedAuthorTag = String(row.player_tag ?? '').trim().toLowerCase();
+  const isAdminPost =
+    Boolean(row.is_admin_post) ||
+    normalizedAuthorTag === 'admin' ||
+    normalizedAuthorTag === 'official' ||
+    normalizedAuthorTag === 'clash companion';
+
   return {
     id: row.id,
     playerTag: row.player_tag,
@@ -298,6 +305,7 @@ function mapPost(row) {
     likeCount: row.like_count,
     commentCount: row.comment_count,
     shareCount: row.share_count,
+    isAdminPost,
     isFollowing: Boolean(row.is_following),
     followerCount: Number(row.follower_count ?? 0),
     followingCount: Number(row.following_count ?? 0),
@@ -823,8 +831,8 @@ export class ContentController {
     const result = await pool.query(
       `
       insert into social_posts
-        (player_tag, player_name, player_avatar_url, player_clan_name, player_clan_role, body, image_url, poll_question, poll_options, hashtags, featured, published)
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        (player_tag, player_name, player_avatar_url, player_clan_name, player_clan_role, body, image_url, poll_question, poll_options, hashtags, is_admin_post, featured, published)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, $11, $12)
       returning *
       `,
       [

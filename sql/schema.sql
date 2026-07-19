@@ -142,6 +142,7 @@ create table if not exists social_posts (
   like_count integer not null default 0,
   comment_count integer not null default 0,
   share_count integer not null default 0,
+  is_admin_post boolean not null default false,
   featured boolean not null default false,
   published boolean not null default true,
   created_at timestamptz not null default now(),
@@ -153,6 +154,13 @@ create table if not exists social_posts (
 
 alter table social_posts
   add column if not exists hashtags jsonb not null default '[]'::jsonb;
+
+alter table social_posts
+  add column if not exists is_admin_post boolean not null default false;
+
+update social_posts
+set is_admin_post = true
+where lower(trim(player_tag)) in ('admin', 'official', 'clash companion');
 
 update social_posts
 set hashtags = hashtags

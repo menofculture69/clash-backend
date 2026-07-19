@@ -8,6 +8,11 @@ import { hashToken } from '../utils/hash.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
 import { normalizeTag } from '../utils/tag.js';
 import { clashService } from './clash.service.js';
+
+const failedLoginAttempts = new Map();
+const maxFailedLoginAttempts = 3;
+const loginCooldownMs = 5 * 60 * 1000;
+
 function activeBan(user) {
   if (!user?.banned_at) return null;
   if (!user.banned_until) return {
@@ -23,10 +28,62 @@ function activeBan(user) {
   return null;
 }
 
+function loginAttemptKey(playerTag, ipAddress) {
+  return `${ipAddress ?? 'unknown'}:${playerTag}`;
+}
+
+function assertLoginAllowed(key) {
+  const attempt = failedLoginAttempts.get(key);
+  if (!attempt?.lockedUntil) return;
+  const remainingMs = attempt.lockedUntil - Date.now();
+  if (remainingMs <= 0) {
+    failedLoginAttempts.delete(key);
+    return;
+  }
+  throw new AppError(
+    `Too many failed login attempts. Try again in ${Math.ceil(remainingMs / 1000)} seconds.`,
+    429,
+    true,
+    {
+      retryAfterSeconds: Math.ceil(remainingMs / 1000),
+      lockedUntil: new Date(attempt.lockedUntil).toISOString()
+    }
+  );
+}
+
+function recordFailedLoginAttempt(key) {
+  const now = Date.now();
+  const current = failedLoginAttempts.get(key);
+  const attempt = current && current.expiresAt > now
+    ? current
+    : { count: 0, expiresAt: now + loginCooldownMs, lockedUntil: null };
+  attempt.count += 1;
+  attempt.expiresAt = now + loginCooldownMs;
+  if (attempt.count >= maxFailedLoginAttempts) {
+    attempt.lockedUntil = now + loginCooldownMs;
+  }
+  failedLoginAttempts.set(key, attempt);
+
+  if (attempt.lockedUntil) {
+    const retryAfterSeconds = Math.ceil((attempt.lockedUntil - now) / 1000);
+    throw new AppError(
+      `Too many failed login attempts. Try again in ${retryAfterSeconds} seconds.`,
+      429,
+      true,
+      {
+        retryAfterSeconds,
+        lockedUntil: new Date(attempt.lockedUntil).toISOString()
+      }
+    );
+  }
+}
+
 export class AuthService {
   async login(input) {
     const playerTag = normalizeTag(input.playerTag);
+    const attemptKey = loginAttemptKey(playerTag, input.ipAddress);
     try {
+      assertLoginAllowed(attemptKey);
       await clashService.verifyPlayerToken(playerTag, input.verifyToken);
       const player = await clashService.getPlayer(playerTag);
       const clan = player.clan ?? {};
@@ -78,6 +135,7 @@ export class AuthService {
         ipAddress: input.ipAddress,
         deviceInfo: input.deviceInfo
       });
+      failedLoginAttempts.delete(attemptKey);
       return {
         accessToken,
         refreshToken,
@@ -97,6 +155,9 @@ export class AuthService {
         deviceInfo: input.deviceInfo,
         reason: error instanceof Error ? error.message : 'Unknown error'
       });
+      if (!(error instanceof AppError && error.statusCode === 429)) {
+        recordFailedLoginAttempt(attemptKey);
+      }
       throw error;
     }
   }
