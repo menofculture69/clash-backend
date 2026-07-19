@@ -307,6 +307,8 @@ function mapPost(row) {
     shareCount: row.share_count,
     isAdminPost,
     isFollowing: Boolean(row.is_following),
+    isLiked: Boolean(row.is_liked),
+    viewerLiked: Boolean(row.is_liked),
     followerCount: Number(row.follower_count ?? 0),
     followingCount: Number(row.following_count ?? 0),
     featured: row.featured,
@@ -602,6 +604,11 @@ export class ContentController {
           where sf.follower_tag = $${viewerIndex}
             and sf.following_tag = p.player_tag
         )` : 'false'} as is_following,
+        ${viewerIndex ? `exists (
+          select 1 from social_post_likes spl
+          where spl.post_id = p.id
+            and spl.player_tag = $${viewerIndex}
+        )` : 'false'} as is_liked,
         (select count(*)::int from social_follows sf where sf.following_tag = p.player_tag) as follower_count,
         (select count(*)::int from social_follows sf where sf.follower_tag = p.player_tag) as following_count
       from social_posts p
@@ -1168,7 +1175,10 @@ export class ContentController {
       `,
       [postId]
     );
-    return res.json({ likeCount: result.rows[0]?.like_count ?? 0 });
+    return res.json({
+      likeCount: result.rows[0]?.like_count ?? 0,
+      isLiked: true
+    });
   }
 
   async follow(req, res) {
