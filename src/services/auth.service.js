@@ -155,7 +155,7 @@ export class AuthService {
         deviceInfo: input.deviceInfo,
         reason: error instanceof Error ? error.message : 'Unknown error'
       });
-      if (!(error instanceof AppError && error.statusCode === 429)) {
+      if (error instanceof AppError && error.statusCode === 401) {
         recordFailedLoginAttempt(attemptKey);
       }
       throw error;

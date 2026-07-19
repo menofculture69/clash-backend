@@ -5,13 +5,21 @@ import { encodeTag } from '../utils/tag.js';
 export class ClashService {
   async verifyPlayerToken(playerTag, verifyToken) {
     const encodedTag = encodeTag(playerTag);
+    const normalizedToken = String(verifyToken)
+      .replace(/[\s\u200B-\u200D\uFEFF]/g, '')
+      .toLowerCase();
     const result = await this.requestJson(`/players/${encodedTag}/verifytoken`, {
       method: 'POST',
-      body: JSON.stringify({ token: verifyToken.trim() })
+      body: JSON.stringify({ token: normalizedToken })
     });
 
-    if (result.status !== 'ok') {
-      throw new AppError('Verification failed. Check your player tag and token.', 401, true);
+    if (String(result.status).toLowerCase() !== 'ok') {
+      throw new AppError(
+        'The Clash API did not accept this verification token. Generate a new API Token in Clash of Clans and try again.',
+        401,
+        true,
+        { code: 'VERIFY_TOKEN_REJECTED' }
+      );
     }
   }
 
@@ -84,7 +92,18 @@ export class ClashService {
             : typeof data.message === 'string'
               ? data.message
               : 'Clash API request failed.';
-        throw new AppError(reason, response.status, true);
+        if (response.status === 403) {
+          throw new AppError(
+            'The Clash API rejected the backend API key or server IP. Update the Clash developer key allowlist and restart the backend.',
+            503,
+            true,
+            { code: 'CLASH_API_ACCESS_DENIED', upstreamReason: reason }
+          );
+        }
+        throw new AppError(reason, response.status, true, {
+          code: 'CLASH_API_REQUEST_FAILED',
+          upstreamReason: reason
+        });
       }
 
       return data;
