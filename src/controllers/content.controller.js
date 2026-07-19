@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { pool } from '../config/database.js';
+import { env } from '../config/env.js';
 import { cloudinaryService } from '../services/cloudinary.service.js';
 import { clashService } from '../services/clash.service.js';
 import { AppError } from '../utils/errors.js';
@@ -131,14 +132,32 @@ const kindSchemas = {
 };
 
 const uploadSchema = z.object({
-  dataUrl: z.string().min(1),
-  folder: z.string().min(1).max(80).optional()
+  dataUrl: z.string()
+    .max(2_700_000, 'Image must be smaller than 2 MB.')
+    .regex(/^data:image\/(?:jpeg|png|webp);base64,/i, 'Only JPEG, PNG, and WebP images are allowed.'),
+  folder: z.string().regex(/^clash-companion\/[a-z0-9-]+$/i).optional()
 });
+
+const containsLink = (value) => /(?:https?:\/\/|www\.|(?:^|\s)[a-z0-9-]+\.(?:com|net|org|io|co|in)(?:\b|\/))/i.test(value);
+const safeSocialText = (maximum) => z.string().max(maximum).refine(
+  (value) => !containsLink(value),
+  'Links are not allowed in community text.'
+);
+
+const userImageUrlSchema = z.union([
+  z.literal(''),
+  z.string().url().refine((value) => {
+    const url = new URL(value);
+    return url.protocol === 'https:' &&
+      url.hostname === 'res.cloudinary.com' &&
+      url.pathname.startsWith(`/${env.CLOUDINARY_CLOUD_NAME}/image/upload/`);
+  }, 'Images must be uploaded through Clash Companion.')
+]);
 
 const publicPostSchema = z.object({
   playerTag: z.string().min(1),
-  body: z.string().max(2000).optional().default(''),
-  imageUrl: z.union([z.string().url(), z.literal('')]).optional().default(''),
+  body: safeSocialText(2000).optional().default(''),
+  imageUrl: userImageUrlSchema.optional().default(''),
   pollQuestion: z.string().max(160).optional().nullable(),
   pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([]),
   hashtags: z.array(z.enum(socialHashtags)).max(5).optional().default([])
@@ -146,7 +165,7 @@ const publicPostSchema = z.object({
 
 const commentSchema = z.object({
   playerTag: z.string().min(1),
-  body: z.string().min(1).max(500)
+  body: safeSocialText(500).refine((value) => value.trim().length > 0, 'Comment cannot be empty.')
 });
 
 const followSchema = z.object({
@@ -165,6 +184,12 @@ const announcementReactionSchema = z.object({
 
 const announcementVoteSchema = z.object({
   optionIndex: z.coerce.number().int().min(0).max(5)
+});
+
+const userBanSchema = z.object({
+  days: z.coerce.number().int().min(1).max(3650).optional().nullable(),
+  permanent: z.boolean().optional().default(false),
+  reason: z.string().max(300).optional().default('')
 });
 
 function ensureKind(kind) {
@@ -375,6 +400,19 @@ function mapHallAsset(row) {
 
 async function playerIdentity(playerTag) {
   const normalizedTag = normalizeTag(playerTag);
+  const existingUser = await pool.query(
+    'select banned_until, ban_reason, banned_at from app_users where player_tag = $1',
+    [normalizedTag]
+  );
+  const ban = existingUser.rows[0];
+  if (ban?.banned_at && (!ban.banned_until || new Date(ban.banned_until).getTime() > Date.now())) {
+    throw new AppError(
+      ban.banned_until ? 'Account is temporarily banned.' : 'Account is permanently banned.',
+      403,
+      true,
+      { ban: { bannedUntil: ban.banned_until, banReason: ban.ban_reason || '' } }
+    );
+  }
   const player = await clashService.getPlayer(normalizedTag);
   const leagueIcon =
     player.leagueTier?.iconUrls?.small ??
@@ -399,6 +437,13 @@ async function playerIdentity(playerTag) {
     playerClanName: player.clan?.name ?? null,
     playerClanRole: clanRole
   };
+}
+
+function authenticatedTag(req) {
+  if (!req.auth?.playerTag) {
+    throw new AppError('Authenticated player identity is required.', 401, true);
+  }
+  return normalizeTag(req.auth.playerTag);
 }
 
 async function followCounts(playerTag, viewerTag = null) {
@@ -452,7 +497,7 @@ export class ContentController {
     }
 
     if (kind === 'announcements') {
-      const viewerTag = req.query.playerTag ? normalizeTag(String(req.query.playerTag)) : null;
+      const viewerTag = authenticatedTag(req);
       const result = await pool.query(
         `
         select a.*,
@@ -518,7 +563,7 @@ export class ContentController {
       return res.json({ items: result.rows.map(mapHallAsset) });
     }
 
-    const viewerTag = req.query.playerTag ? normalizeTag(String(req.query.playerTag)) : null;
+    const viewerTag = authenticatedTag(req);
     const values = [];
     const filters = ['p.published = true'];
     if (featuredOnly) filters.push('p.featured = true');
@@ -611,6 +656,8 @@ export class ContentController {
       return res.json({ items: result.rows.map((row) => ({
         id: row.id, playerTag: row.player_tag, playerName: row.player_name,
         clanTag: row.clan_tag, clanName: row.clan_name, avatarUrl: row.avatar_url,
+        bannedUntil: row.banned_until, banReason: row.ban_reason, bannedAt: row.banned_at,
+        isBanned: Boolean(row.banned_at && (!row.banned_until || new Date(row.banned_until).getTime() > Date.now())),
         createdAt: row.created_at, updatedAt: row.updated_at,
         lastLoginAt: row.last_login_at, lastActiveAt: row.last_active_at,
         sessionCount: Number(row.session_count ?? 0), activeSessionCount: Number(row.active_session_count ?? 0),
@@ -800,7 +847,7 @@ export class ContentController {
 
   async createPublicPost(req, res) {
     const payload = publicPostSchema.parse(req.body);
-    const identity = await playerIdentity(payload.playerTag);
+    const identity = await playerIdentity(authenticatedTag(req));
     const result = await pool.query(
       `
       insert into social_posts
@@ -985,6 +1032,50 @@ export class ContentController {
     return res.json({ success: true });
   }
 
+  async banUser(req, res) {
+    const id = toUuid(req.params.id);
+    const payload = userBanSchema.parse(req.body);
+    const bannedUntil = payload.permanent
+      ? null
+      : new Date(Date.now() + Number(payload.days ?? 1) * 24 * 60 * 60 * 1000);
+    const result = await pool.query(
+      `update app_users
+       set banned_until = $2, ban_reason = $3, banned_at = now(), updated_at = now()
+       where id = $1
+       returning id, player_tag, player_name, banned_until, ban_reason, banned_at`,
+      [id, bannedUntil, payload.reason || 'Banned by admin.']
+    );
+    if (!result.rows[0]) throw new AppError('User not found.', 404, true);
+    await pool.query('update app_sessions set revoked_at = now() where user_id = $1 and revoked_at is null', [id]);
+    return res.json({
+      id: result.rows[0].id,
+      playerTag: result.rows[0].player_tag,
+      playerName: result.rows[0].player_name,
+      bannedUntil: result.rows[0].banned_until,
+      banReason: result.rows[0].ban_reason,
+      bannedAt: result.rows[0].banned_at,
+      isBanned: true
+    });
+  }
+
+  async unbanUser(req, res) {
+    const id = toUuid(req.params.id);
+    const result = await pool.query(
+      `update app_users
+       set banned_until = null, ban_reason = '', banned_at = null, updated_at = now()
+       where id = $1
+       returning id, player_tag, player_name`,
+      [id]
+    );
+    if (!result.rows[0]) throw new AppError('User not found.', 404, true);
+    return res.json({
+      id: result.rows[0].id,
+      playerTag: result.rows[0].player_tag,
+      playerName: result.rows[0].player_name,
+      isBanned: false
+    });
+  }
+
   async remove(req, res) {
     const kind = String(req.params.kind);
     if (kind === 'reports') {
@@ -1027,28 +1118,31 @@ export class ContentController {
   }
 
   async notifications(req, res) {
-    const playerTag = req.query.playerTag ? normalizeTag(String(req.query.playerTag)) : null;
+    const playerTag = authenticatedTag(req);
     const result = await pool.query(
       `
       select * from social_notifications
-      where player_tag is null ${playerTag ? 'or player_tag = $1' : ''}
+      where player_tag is null or player_tag = $1
       order by created_at desc
       limit 30
       `,
-      playerTag ? [playerTag] : []
+      [playerTag]
     );
     return res.json({ items: result.rows.map(mapNotification) });
   }
 
   async upload(req, res) {
     const payload = uploadSchema.parse(req.body);
-    const result = await cloudinaryService.uploadDataUrl(payload);
+    const result = await cloudinaryService.uploadDataUrl({
+      ...payload,
+      folder: req.auth ? 'clash-companion/social' : payload.folder
+    });
     return res.status(201).json(result);
   }
 
   async like(req, res) {
     const postId = toUuid(req.params.id);
-    const playerTag = normalizeTag(String(req.body.playerTag ?? ''));
+    const playerTag = authenticatedTag(req);
     await pool.query(
       `
       insert into social_post_likes (post_id, player_tag)
@@ -1071,7 +1165,7 @@ export class ContentController {
 
   async follow(req, res) {
     const payload = followSchema.parse(req.body);
-    const follower = await playerIdentity(payload.followerTag);
+    const follower = await playerIdentity(authenticatedTag(req));
     const following = await playerIdentity(payload.followingTag);
     if (follower.playerTag === following.playerTag) {
       throw new AppError('You cannot follow yourself.', 400, true);
@@ -1110,7 +1204,7 @@ export class ContentController {
 
   async unfollow(req, res) {
     const payload = followSchema.parse(req.body);
-    const followerTag = normalizeTag(payload.followerTag);
+    const followerTag = authenticatedTag(req);
     const followingTag = normalizeTag(payload.followingTag);
     await pool.query(
       'delete from social_follows where follower_tag = $1 and following_tag = $2',
@@ -1122,7 +1216,7 @@ export class ContentController {
 
   async followCounts(req, res) {
     const playerTag = normalizeTag(String(req.query.playerTag ?? ''));
-    const viewerTag = req.query.viewerTag ? normalizeTag(String(req.query.viewerTag)) : null;
+    const viewerTag = authenticatedTag(req);
     const counts = await followCounts(playerTag, viewerTag);
     return res.json(counts);
   }
@@ -1166,7 +1260,7 @@ export class ContentController {
   async comment(req, res) {
     const postId = toUuid(req.params.id);
     const payload = commentSchema.parse(req.body);
-    const identity = await playerIdentity(payload.playerTag);
+    const identity = await playerIdentity(authenticatedTag(req));
     const comment = await pool.query(
       `
       insert into social_post_comments (post_id, player_tag, player_name, body)
@@ -1189,7 +1283,7 @@ export class ContentController {
   async report(req, res) {
     const postId = toUuid(req.params.id);
     const payload = reportSchema.parse(req.body);
-    const identity = await playerIdentity(payload.playerTag);
+    const identity = await playerIdentity(authenticatedTag(req));
     const post = await pool.query(
       'select id from social_posts where id = $1 and published = true',
       [postId]
@@ -1233,10 +1327,16 @@ export class ContentController {
 
   async share(req, res) {
     const postId = toUuid(req.params.id);
+    const playerTag = authenticatedTag(req);
+    await pool.query(
+      `insert into social_post_shares (post_id, player_tag)
+       values ($1, $2) on conflict do nothing`,
+      [postId, playerTag]
+    );
     const result = await pool.query(
       `
       update social_posts
-      set share_count = share_count + 1
+      set share_count = (select count(*)::int from social_post_shares where post_id = $1)
       where id = $1
       returning share_count
       `,

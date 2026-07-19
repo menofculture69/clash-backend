@@ -15,10 +15,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   CLASH_API_BASE_URL: z.string().url().default('https://api.clashofclans.com/v1'),
   CLASH_API_JWT: z.string().min(1),
-  APP_JWT_SECRET: z.string().min(16).default(
+  APP_JWT_SECRET: z.string().min(nodeEnv === 'production' ? 32 : 16).default(
     nodeEnv === 'production' ? '' : devJwtSecret
   ),
-  APP_REFRESH_SECRET: z.string().min(16).default(
+  APP_REFRESH_SECRET: z.string().min(nodeEnv === 'production' ? 32 : 16).default(
     nodeEnv === 'production' ? '' : devRefreshSecret
   ),
   CORS_ALLOWED_ORIGINS: z.string().default(''),
@@ -30,7 +30,8 @@ const envSchema = z.object({
   AUTH_RATE_LIMIT_MAX: z.coerce.number().default(10),
   MONGODB_URI: z.string().optional(),
   MONGODB_DATABASE: z.string().default('clash_companion'),
-  ADMIN_API_KEY: z.string().min(24).optional(),
+  ADMIN_API_KEY: z.string().min(nodeEnv === 'production' ? 32 : 24).optional(),
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional()

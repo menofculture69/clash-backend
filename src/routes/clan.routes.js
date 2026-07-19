@@ -6,6 +6,8 @@ import { asyncHandler } from '../utils/async-handler.js';
 
 export const clanRouter = Router();
 
+clanRouter.use(requireAuth);
+
 clanRouter.get('/tag/:clanTag', asyncHandler((req, res) => clanController.byTag(req, res)));
 clanRouter.get(
   '/tag/:clanTag/members',
@@ -28,17 +30,15 @@ clanRouter.get(
   asyncHandler((req, res) => clanController.fullByTag(req, res))
 );
 
-clanRouter.get('/me', requireAuth, asyncHandler((req, res) => clanController.me(req, res)));
-clanRouter.get('/me/members', requireAuth, asyncHandler((req, res) => clanController.members(req, res)));
-clanRouter.get('/me/warlog', requireAuth, asyncHandler((req, res) => clanController.warLog(req, res)));
+clanRouter.get('/me', asyncHandler((req, res) => clanController.me(req, res)));
+clanRouter.get('/me/members', asyncHandler((req, res) => clanController.members(req, res)));
+clanRouter.get('/me/warlog', asyncHandler((req, res) => clanController.warLog(req, res)));
 clanRouter.get(
   '/me/currentwar',
-  requireAuth,
   asyncHandler((req, res) => clanController.currentWar(req, res))
 );
 clanRouter.get(
   '/me/capitalraidseasons',
-  requireAuth,
   asyncHandler((req, res) => clanController.capitalRaidSeasons(req, res))
 );
-clanRouter.get('/me/full', requireAuth, asyncHandler((req, res) => clanController.full(req, res)));
+clanRouter.get('/me/full', asyncHandler((req, res) => clanController.full(req, res)));

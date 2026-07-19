@@ -12,7 +12,7 @@ export class UserRepository {
         clan_name = excluded.clan_name,
         avatar_url = excluded.avatar_url,
         updated_at = now()
-      returning id, player_tag, player_name, clan_tag, clan_name, avatar_url
+      returning id, player_tag, player_name, clan_tag, clan_name, avatar_url, banned_until, ban_reason, banned_at
     `;
 
     const values = [
@@ -28,7 +28,7 @@ export class UserRepository {
 
   async getById(userId) {
     const result = await pool.query(
-      `select id, player_tag, player_name, clan_tag, clan_name, avatar_url from app_users where id = $1`,
+      `select id, player_tag, player_name, clan_tag, clan_name, avatar_url, banned_until, ban_reason, banned_at from app_users where id = $1`,
       [userId]
     );
     return result.rows[0] ?? null;

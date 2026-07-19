@@ -7,9 +7,17 @@ create table if not exists app_users (
   clan_tag text,
   clan_name text,
   avatar_url text,
+  banned_until timestamptz,
+  ban_reason text not null default '',
+  banned_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table app_users
+  add column if not exists banned_until timestamptz,
+  add column if not exists ban_reason text not null default '',
+  add column if not exists banned_at timestamptz;
 
 create table if not exists app_sessions (
   id uuid primary key default gen_random_uuid(),
@@ -187,6 +195,13 @@ create table if not exists social_post_likes (
   primary key (post_id, player_tag)
 );
 
+create table if not exists social_post_shares (
+  post_id uuid not null references social_posts(id) on delete cascade,
+  player_tag text not null,
+  created_at timestamptz not null default now(),
+  primary key (post_id, player_tag)
+);
+
 create table if not exists social_post_comments (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references social_posts(id) on delete cascade,
@@ -259,3 +274,17 @@ create table if not exists hall_assets (
 
 create index if not exists idx_hall_assets_lookup
   on hall_assets (hall_type, level);
+
+create table if not exists admin_audit_logs (
+  id bigserial primary key,
+  method text not null,
+  path text not null,
+  status_code integer not null,
+  ip_address text,
+  user_agent text,
+  duration_ms integer not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_admin_audit_logs_created_at
+  on admin_audit_logs (created_at desc);

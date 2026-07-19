@@ -6,6 +6,8 @@ import { asyncHandler } from '../utils/async-handler.js';
 
 export const playerRouter = Router();
 
+playerRouter.use(requireAuth);
+
 playerRouter.get('/tag/:playerTag', asyncHandler((req, res) => playerController.byTag(req, res)));
 playerRouter.get(
   '/tag/:playerTag/battlelog',
@@ -20,15 +22,13 @@ playerRouter.get(
   asyncHandler((req, res) => playerController.fullByTag(req, res))
 );
 
-playerRouter.get('/me', requireAuth, asyncHandler((req, res) => playerController.me(req, res)));
+playerRouter.get('/me', asyncHandler((req, res) => playerController.me(req, res)));
 playerRouter.get(
   '/me/battlelog',
-  requireAuth,
   asyncHandler((req, res) => playerController.battleLog(req, res))
 );
 playerRouter.get(
   '/me/leaguehistory',
-  requireAuth,
   asyncHandler((req, res) => playerController.leagueHistory(req, res))
 );
-playerRouter.get('/me/full', requireAuth, asyncHandler((req, res) => playerController.full(req, res)));
+playerRouter.get('/me/full', asyncHandler((req, res) => playerController.full(req, res)));

@@ -16,13 +16,16 @@ export function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
-  app.set('trust proxy', env.isProduction);
+  app.set('trust proxy', env.TRUST_PROXY_HOPS);
 
   app.use(requestIdMiddleware);
   app.use(helmet());
   app.use(
     cors({
-      origin: env.corsAllowedOrigins.length === 0 ? true : env.corsAllowedOrigins,
+      origin(origin, callback) {
+        if (!origin) return callback(null, true);
+        return callback(null, env.corsAllowedOrigins.includes(origin));
+      },
       credentials: false
     })
   );
