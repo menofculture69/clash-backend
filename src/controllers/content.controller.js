@@ -456,6 +456,17 @@ function authenticatedTag(req) {
   return normalizeTag(req.auth.playerTag);
 }
 
+function optionalAuthenticatedTag(req) {
+  if (!req.auth?.playerTag) {
+    return null;
+  }
+  try {
+    return normalizeTag(req.auth.playerTag);
+  } catch {
+    return null;
+  }
+}
+
 async function followCounts(playerTag, viewerTag = null) {
   const values = [playerTag];
   const viewerIndex = viewerTag
@@ -507,7 +518,7 @@ export class ContentController {
     }
 
     if (kind === 'announcements') {
-      const viewerTag = authenticatedTag(req);
+      const viewerTag = optionalAuthenticatedTag(req);
       const result = await pool.query(
         `
         select a.*,
@@ -573,7 +584,7 @@ export class ContentController {
       return res.json({ items: result.rows.map(mapHallAsset) });
     }
 
-    const viewerTag = authenticatedTag(req);
+    const viewerTag = optionalAuthenticatedTag(req);
     const values = [];
     const filters = ['p.published = true'];
     if (featuredOnly) filters.push('p.featured = true');
@@ -1234,7 +1245,7 @@ export class ContentController {
 
   async followCounts(req, res) {
     const playerTag = normalizeTag(String(req.query.playerTag ?? ''));
-    const viewerTag = authenticatedTag(req);
+    const viewerTag = optionalAuthenticatedTag(req);
     const counts = await followCounts(playerTag, viewerTag);
     return res.json(counts);
   }

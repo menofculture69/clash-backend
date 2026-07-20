@@ -6,7 +6,8 @@ export const globalRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: env.GLOBAL_RATE_LIMIT_MAX,
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please try again later.' }
 });
 
 export const authRateLimit = rateLimit({

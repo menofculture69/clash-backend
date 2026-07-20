@@ -35,3 +35,30 @@ export async function requireAuth(req, _res, next) {
     return next(new UnauthorizedError('Invalid access token.'));
   }
 }
+
+export async function optionalAuth(req, _res, next) {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    return next();
+  }
+
+  try {
+    const auth = verifyAccessToken(header.slice(7));
+    const result = await pool.query(
+      `select s.id as active_session_id
+       from app_users u
+       left join app_sessions s on s.id = $2 and s.user_id = u.id
+         and s.revoked_at is null and s.expires_at > now()
+       where u.id = $1`,
+      [auth.sub, auth.sessionId]
+    );
+    if (result.rows[0]?.active_session_id) {
+      req.auth = auth;
+    }
+  } catch {
+    // Public reads should still work when a saved local account has a stale
+    // access token. Mutations continue to use requireAuth.
+  }
+
+  return next();
+}
