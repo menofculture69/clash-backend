@@ -25,6 +25,11 @@ const socialHashtags = [
   'Polls'
 ];
 const hallTypes = ['townHall', 'builderHall'];
+const tagSchema = z
+  .string()
+  .min(3)
+  .max(16)
+  .transform((value) => normalizeTag(value));
 const strategyUnitSchema = z
   .union([
     z.string().min(1).max(120),
@@ -179,10 +184,12 @@ const reportSchema = z.object({
 });
 
 const announcementReactionSchema = z.object({
+  playerTag: tagSchema,
   reaction: z.enum(['like', 'love', 'laugh', 'wow', 'sad', 'support'])
 });
 
 const announcementVoteSchema = z.object({
+  playerTag: tagSchema,
   optionIndex: z.coerce.number().int().min(0).max(5)
 });
 
@@ -450,21 +457,47 @@ async function playerIdentity(playerTag) {
 }
 
 function authenticatedTag(req) {
-  if (!req.auth?.playerTag) {
-    throw new AppError('Authenticated player identity is required.', 401, true);
+  const candidate = req.body?.playerTag ?? req.query?.playerTag ?? req.auth?.playerTag;
+  if (!candidate) {
+    throw new AppError('Player tag is required.', 400, true);
   }
-  return normalizeTag(req.auth.playerTag);
+  return normalizeTag(candidate);
 }
 
 function optionalAuthenticatedTag(req) {
-  if (!req.auth?.playerTag) {
+  const candidate = req.query?.viewerTag ?? req.query?.playerTag ?? req.body?.playerTag ?? req.auth?.playerTag;
+  if (!candidate) {
     return null;
   }
   try {
-    return normalizeTag(req.auth.playerTag);
+    return normalizeTag(candidate);
   } catch {
     return null;
   }
+}
+
+async function appUserIdForTag(playerTag) {
+  const normalizedTag = normalizeTag(playerTag);
+  const existing = await pool.query(
+    'select id, banned_until, ban_reason, banned_at from app_users where player_tag = $1',
+    [normalizedTag]
+  );
+  const user = existing.rows[0];
+  if (user) {
+    if (user.banned_at && (!user.banned_until || new Date(user.banned_until).getTime() > Date.now())) {
+      throw new AppError(user.ban_reason ? `This account is banned: ${user.ban_reason}` : 'This account is banned.', 403, true);
+    }
+    return user.id;
+  }
+
+  const inserted = await pool.query(
+    `insert into app_users (player_tag, player_name)
+     values ($1, $1)
+     on conflict (player_tag) do update set updated_at = now()
+     returning id`,
+    [normalizedTag]
+  );
+  return inserted.rows[0].id;
 }
 
 async function followCounts(playerTag, viewerTag = null) {
@@ -873,7 +906,7 @@ export class ContentController {
 
   async createPublicPost(req, res) {
     const payload = publicPostSchema.parse(req.body);
-    const identity = await playerIdentity(authenticatedTag(req));
+    const identity = await playerIdentity(payload.playerTag);
     const result = await pool.query(
       `
       insert into social_posts
@@ -1030,8 +1063,8 @@ export class ContentController {
 
   async reactToAnnouncement(req, res) {
     const announcementId = toUuid(req.params.id);
-    const { reaction } = announcementReactionSchema.parse(req.body);
-    const userId = req.auth.sub;
+    const { playerTag, reaction } = announcementReactionSchema.parse(req.body);
+    const userId = await appUserIdForTag(playerTag);
     const existing = await pool.query(
       'select reaction from announcement_reactions where announcement_id = $1 and user_id = $2',
       [announcementId, userId]
@@ -1048,13 +1081,14 @@ export class ContentController {
 
   async voteAnnouncementPoll(req, res) {
     const announcementId = toUuid(req.params.id);
-    const { optionIndex } = announcementVoteSchema.parse(req.body);
+    const { playerTag, optionIndex } = announcementVoteSchema.parse(req.body);
+    const userId = await appUserIdForTag(playerTag);
     const announcement = await pool.query('select poll_options from content_announcements where id = $1 and published = true', [announcementId]);
     if (!announcement.rows[0]) throw new AppError('Announcement not found.', 404, true);
     if (optionIndex >= (announcement.rows[0].poll_options ?? []).length) throw new AppError('Invalid poll option.', 400, true);
     await pool.query(`insert into announcement_poll_votes (announcement_id, user_id, option_index)
       values ($1, $2, $3) on conflict (announcement_id, user_id)
-      do update set option_index = excluded.option_index, updated_at = now()`, [announcementId, req.auth.sub, optionIndex]);
+      do update set option_index = excluded.option_index, updated_at = now()`, [announcementId, userId, optionIndex]);
     return res.json({ success: true });
   }
 
@@ -1161,7 +1195,7 @@ export class ContentController {
     const payload = uploadSchema.parse(req.body);
     const result = await cloudinaryService.uploadDataUrl({
       ...payload,
-      folder: req.auth ? 'clash-companion/social' : payload.folder
+      folder: payload.folder ?? 'clash-companion/social'
     });
     return res.status(201).json(result);
   }
@@ -1169,6 +1203,7 @@ export class ContentController {
   async like(req, res) {
     const postId = toUuid(req.params.id);
     const playerTag = authenticatedTag(req);
+    await appUserIdForTag(playerTag);
     await pool.query(
       `
       insert into social_post_likes (post_id, player_tag)
@@ -1194,7 +1229,7 @@ export class ContentController {
 
   async follow(req, res) {
     const payload = followSchema.parse(req.body);
-    const follower = await playerIdentity(authenticatedTag(req));
+    const follower = await playerIdentity(payload.followerTag);
     const following = await playerIdentity(payload.followingTag);
     if (follower.playerTag === following.playerTag) {
       throw new AppError('You cannot follow yourself.', 400, true);
@@ -1233,7 +1268,7 @@ export class ContentController {
 
   async unfollow(req, res) {
     const payload = followSchema.parse(req.body);
-    const followerTag = authenticatedTag(req);
+    const followerTag = normalizeTag(payload.followerTag);
     const followingTag = normalizeTag(payload.followingTag);
     await pool.query(
       'delete from social_follows where follower_tag = $1 and following_tag = $2',
@@ -1289,7 +1324,7 @@ export class ContentController {
   async comment(req, res) {
     const postId = toUuid(req.params.id);
     const payload = commentSchema.parse(req.body);
-    const identity = await playerIdentity(authenticatedTag(req));
+    const identity = await playerIdentity(payload.playerTag);
     const comment = await pool.query(
       `
       insert into social_post_comments (post_id, player_tag, player_name, body)
@@ -1312,7 +1347,7 @@ export class ContentController {
   async report(req, res) {
     const postId = toUuid(req.params.id);
     const payload = reportSchema.parse(req.body);
-    const identity = await playerIdentity(authenticatedTag(req));
+    const identity = await playerIdentity(payload.playerTag);
     const post = await pool.query(
       'select id from social_posts where id = $1 and published = true',
       [postId]
@@ -1357,6 +1392,7 @@ export class ContentController {
   async share(req, res) {
     const postId = toUuid(req.params.id);
     const playerTag = authenticatedTag(req);
+    await appUserIdForTag(playerTag);
     await pool.query(
       `insert into social_post_shares (post_id, player_tag)
        values ($1, $2) on conflict do nothing`,
