@@ -203,6 +203,18 @@ create table if not exists social_post_likes (
   primary key (post_id, player_tag)
 );
 
+create table if not exists social_post_poll_votes (
+  post_id uuid not null references social_posts(id) on delete cascade,
+  player_tag text not null,
+  option_index integer not null check (option_index between 0 and 5),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (post_id, player_tag)
+);
+
+create index if not exists idx_social_post_poll_votes_post
+  on social_post_poll_votes (post_id);
+
 create table if not exists social_post_shares (
   post_id uuid not null references social_posts(id) on delete cascade,
   player_tag text not null,

@@ -16,6 +16,7 @@ contentRouter.get('/notifications', asyncHandler((req, res) => contentController
 contentRouter.post('/posts', asyncHandler((req, res) => contentController.createPublicPost(req, res)));
 contentRouter.post('/announcements/:id/reaction', asyncHandler((req, res) => contentController.reactToAnnouncement(req, res)));
 contentRouter.post('/announcements/:id/vote', asyncHandler((req, res) => contentController.voteAnnouncementPoll(req, res)));
+contentRouter.post('/posts/:id/vote', asyncHandler((req, res) => contentController.votePostPoll(req, res)));
 contentRouter.post('/posts/:id/like', asyncHandler((req, res) => contentController.like(req, res)));
 contentRouter.get('/posts/:id/comments', asyncHandler((req, res) => contentController.comments(req, res)));
 contentRouter.post('/posts/:id/comment', asyncHandler((req, res) => contentController.comment(req, res)));

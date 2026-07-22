@@ -193,6 +193,11 @@ const announcementVoteSchema = z.object({
   optionIndex: z.coerce.number().int().min(0).max(5)
 });
 
+const postVoteSchema = z.object({
+  playerTag: tagSchema,
+  optionIndex: z.coerce.number().int().min(0).max(5)
+});
+
 const userBanSchema = z.object({
   days: z.coerce.number().int().min(1).max(3650).optional().nullable(),
   permanent: z.boolean().optional().default(false),
@@ -308,6 +313,8 @@ function mapPost(row) {
     imageUrl: row.image_url,
     pollQuestion: row.poll_question,
     pollOptions: row.poll_options ?? [],
+    pollResults: row.poll_results ?? [],
+    viewerVote: row.viewer_vote == null ? null : Number(row.viewer_vote),
     hashtags: row.hashtags ?? [],
     likeCount: row.like_count,
     commentCount: row.comment_count,
@@ -535,6 +542,12 @@ export class ContentController {
     const featuredOnly = kind === 'posts' && req.query.feed === 'featured';
     const followingOnly = kind === 'posts' && req.query.feed === 'following';
     const hashtag = kind === 'posts' && req.query.hashtag ? String(req.query.hashtag) : null;
+    const limit = kind === 'posts'
+      ? Math.max(1, Math.min(50, Number.parseInt(String(req.query.limit ?? '10'), 10) || 10))
+      : null;
+    const offset = kind === 'posts'
+      ? Math.max(0, Number.parseInt(String(req.query.offset ?? '0'), 10) || 0)
+      : null;
 
     if (kind === 'layouts') {
       const values = townHall ? [townHall] : [];
@@ -653,12 +666,25 @@ export class ContentController {
           where spl.post_id = p.id
             and spl.player_tag = $${viewerIndex}
         )` : 'false'} as is_liked,
+        ${`case
+          when jsonb_array_length(p.poll_options) = 0 then '[]'::jsonb
+          else (
+            select jsonb_agg(
+              (select count(*)::int from social_post_poll_votes sppv where sppv.post_id = p.id and sppv.option_index = i)
+              order by i
+            )
+            from generate_series(0, jsonb_array_length(p.poll_options) - 1) i
+          )
+        end`} as poll_results,
+        ${viewerIndex ? `(select sppv.option_index from social_post_poll_votes sppv
+          where sppv.post_id = p.id and sppv.player_tag = $${viewerIndex})` : 'null'} as viewer_vote,
         (select count(*)::int from social_follows sf where sf.following_tag = p.player_tag) as follower_count,
         (select count(*)::int from social_follows sf where sf.follower_tag = p.player_tag) as following_count
       from social_posts p
       where ${filters.join(' and ')}
       order by p.created_at desc
-      limit 100
+      limit ${limit}
+      offset ${offset}
       `,
       values
     );
@@ -1089,6 +1115,24 @@ export class ContentController {
     await pool.query(`insert into announcement_poll_votes (announcement_id, user_id, option_index)
       values ($1, $2, $3) on conflict (announcement_id, user_id)
       do update set option_index = excluded.option_index, updated_at = now()`, [announcementId, userId, optionIndex]);
+    return res.json({ success: true });
+  }
+
+  async votePostPoll(req, res) {
+    const postId = toUuid(req.params.id);
+    const { playerTag, optionIndex } = postVoteSchema.parse(req.body);
+    const post = await pool.query('select poll_options from social_posts where id = $1 and published = true', [postId]);
+    if (!post.rows[0]) throw new AppError('Post not found.', 404, true);
+    if (optionIndex >= (post.rows[0].poll_options ?? []).length) {
+      throw new AppError('Invalid poll option.', 400, true);
+    }
+    await pool.query(
+      `insert into social_post_poll_votes (post_id, player_tag, option_index)
+       values ($1, $2, $3)
+       on conflict (post_id, player_tag)
+       do update set option_index = excluded.option_index, updated_at = now()`,
+      [postId, playerTag, optionIndex]
+    );
     return res.json({ success: true });
   }
 
