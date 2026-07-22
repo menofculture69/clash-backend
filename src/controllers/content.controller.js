@@ -1324,8 +1324,8 @@ export class ContentController {
       ]
     );
 
-    const counts = await followCounts(following.playerTag);
-    return res.status(201).json({ isFollowing: true, ...counts });
+    const counts = await followCounts(following.playerTag, follower.playerTag);
+    return res.status(201).json({ ...counts, isFollowing: true });
   }
 
   async unfollow(req, res) {
@@ -1336,8 +1336,8 @@ export class ContentController {
       'delete from social_follows where follower_tag = $1 and following_tag = $2',
       [followerTag, followingTag]
     );
-    const counts = await followCounts(followingTag);
-    return res.json({ isFollowing: false, ...counts });
+    const counts = await followCounts(followingTag, followerTag);
+    return res.json({ ...counts, isFollowing: false });
   }
 
   async followCounts(req, res) {
