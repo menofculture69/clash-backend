@@ -1248,14 +1248,32 @@ export class ContentController {
     const postId = toUuid(req.params.id);
     const playerTag = authenticatedTag(req);
     await appUserIdForTag(playerTag);
-    await pool.query(
+    const existing = await pool.query(
       `
-      insert into social_post_likes (post_id, player_tag)
-      values ($1, $2)
-      on conflict do nothing
+      select 1 from social_post_likes
+      where post_id = $1 and player_tag = $2
       `,
       [postId, playerTag]
     );
+    const isLiked = existing.rowCount === 0;
+    if (isLiked) {
+      await pool.query(
+        `
+        insert into social_post_likes (post_id, player_tag)
+        values ($1, $2)
+        on conflict do nothing
+        `,
+        [postId, playerTag]
+      );
+    } else {
+      await pool.query(
+        `
+        delete from social_post_likes
+        where post_id = $1 and player_tag = $2
+        `,
+        [postId, playerTag]
+      );
+    }
     const result = await pool.query(
       `
       update social_posts
@@ -1267,7 +1285,7 @@ export class ContentController {
     );
     return res.json({
       likeCount: result.rows[0]?.like_count ?? 0,
-      isLiked: true
+      isLiked
     });
   }
 
