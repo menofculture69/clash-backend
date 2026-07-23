@@ -7,6 +7,7 @@ import { AppError, UnauthorizedError } from '../utils/errors.js';
 import { hashToken } from '../utils/hash.js';
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt.js';
 import { normalizeTag } from '../utils/tag.js';
+import { cloudinaryService } from './cloudinary.service.js';
 import { clashService } from './clash.service.js';
 
 const failedLoginAttempts = new Map();
@@ -227,6 +228,30 @@ export class AuthService {
       isBanned: Boolean(ban),
       bannedUntil: ban?.bannedUntil ?? null,
       banReason: ban?.banReason ?? ''
+    };
+  }
+
+  async updateAvatar(userId, dataUrl) {
+    const user = await userRepository.getById(userId);
+    if (!user) {
+      throw new AppError('User not found.', 404, true);
+    }
+    const uploaded = await cloudinaryService.uploadDataUrl({
+      dataUrl,
+      folder: 'clash-companion/avatars'
+    });
+    const updated = await userRepository.updateAvatarUrl(userId, uploaded.url);
+    if (!updated) {
+      throw new AppError('User not found.', 404, true);
+    }
+    await userRepository.syncAvatarReferences(updated.player_tag, uploaded.url);
+    return {
+      playerTag: updated.player_tag,
+      playerName: updated.player_name,
+      clanTag: updated.clan_tag,
+      clanName: updated.clan_name,
+      playerAvatarUrl: updated.avatar_url,
+      uploadedBytes: uploaded.bytes ?? null
     };
   }
 }

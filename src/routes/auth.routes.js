@@ -5,7 +5,7 @@ import { asyncHandler } from '../utils/async-handler.js';
 import { requireAuth } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rate-limit.js';
 import { validateBody } from '../middleware/validate.js';
-import { loginSchema, refreshSchema } from '../validators/auth.validator.js';
+import { avatarUpdateSchema, loginSchema, refreshSchema } from '../validators/auth.validator.js';
 
 export const authRouter = Router();
 
@@ -27,3 +27,9 @@ authRouter.post(
   asyncHandler((req, res) => authController.logout(req, res))
 );
 authRouter.get('/me', requireAuth, asyncHandler((req, res) => authController.me(req, res)));
+authRouter.post(
+  '/me/avatar',
+  requireAuth,
+  validateBody(avatarUpdateSchema),
+  asyncHandler((req, res) => authController.updateAvatar(req, res))
+);

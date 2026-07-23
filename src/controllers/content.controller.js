@@ -360,6 +360,7 @@ function mapComment(row) {
     postId: row.post_id,
     playerTag: row.player_tag,
     playerName: row.player_name,
+    playerAvatarUrl: row.player_avatar_url ?? '',
     body: row.body,
     createdAt: row.created_at
   };
@@ -1391,9 +1392,22 @@ export class ContentController {
       `
       insert into social_post_comments (post_id, player_tag, player_name, body)
       values ($1, $2, $3, $4)
-      returning *
+      returning
+        id,
+        post_id,
+        player_tag,
+        player_name,
+        body,
+        created_at,
+        $5::text as player_avatar_url
       `,
-      [postId, identity.playerTag, identity.playerName, payload.body]
+      [
+        postId,
+        identity.playerTag,
+        identity.playerName,
+        payload.body,
+        identity.playerAvatarUrl ?? ''
+      ]
     );
     await pool.query(
       `
@@ -1441,9 +1455,13 @@ export class ContentController {
     const postId = toUuid(req.params.id);
     const result = await pool.query(
       `
-      select * from social_post_comments
-      where post_id = $1
-      order by created_at asc
+      select
+        c.*,
+        coalesce(u.avatar_url, '') as player_avatar_url
+      from social_post_comments c
+      left join app_users u on u.player_tag = c.player_tag
+      where c.post_id = $1
+      order by c.created_at asc
       limit 100
       `,
       [postId]

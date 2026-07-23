@@ -33,6 +33,38 @@ export class UserRepository {
     );
     return result.rows[0] ?? null;
   }
+
+  async updateAvatarUrl(userId, avatarUrl) {
+    const result = await pool.query(
+      `update app_users
+       set avatar_url = $2, updated_at = now()
+       where id = $1
+       returning id, player_tag, player_name, clan_tag, clan_name, avatar_url, banned_until, ban_reason, banned_at`,
+      [userId, avatarUrl]
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async syncAvatarReferences(playerTag, avatarUrl) {
+    await pool.query(
+      `update social_posts
+       set player_avatar_url = $2, updated_at = now()
+       where player_tag = $1`,
+      [playerTag, avatarUrl]
+    );
+    await pool.query(
+      `update social_follows
+       set follower_avatar_url = $2
+       where follower_tag = $1`,
+      [playerTag, avatarUrl]
+    );
+    await pool.query(
+      `update social_follows
+       set following_avatar_url = $2
+       where following_tag = $1`,
+      [playerTag, avatarUrl]
+    );
+  }
 }
 
 export const userRepository = new UserRepository();
