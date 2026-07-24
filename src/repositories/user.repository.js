@@ -34,6 +34,16 @@ export class UserRepository {
     return result.rows[0] ?? null;
   }
 
+  async getByPlayerTag(playerTag) {
+    const result = await pool.query(
+      `select id, player_tag, player_name, clan_tag, clan_name, avatar_url, banned_until, ban_reason, banned_at
+       from app_users
+       where player_tag = $1`,
+      [playerTag]
+    );
+    return result.rows[0] ?? null;
+  }
+
   async updateAvatarUrl(userId, avatarUrl) {
     const result = await pool.query(
       `update app_users

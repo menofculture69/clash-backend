@@ -6,8 +6,6 @@ import { asyncHandler } from '../utils/async-handler.js';
 
 export const clanRouter = Router();
 
-clanRouter.use(requireAuth);
-
 clanRouter.get('/tag/:clanTag', asyncHandler((req, res) => clanController.byTag(req, res)));
 clanRouter.get(
   '/tag/:clanTag/members',
@@ -29,6 +27,8 @@ clanRouter.get(
   '/tag/:clanTag/full',
   asyncHandler((req, res) => clanController.fullByTag(req, res))
 );
+
+clanRouter.use(requireAuth);
 
 clanRouter.get('/me', asyncHandler((req, res) => clanController.me(req, res)));
 clanRouter.get('/me/members', asyncHandler((req, res) => clanController.members(req, res)));

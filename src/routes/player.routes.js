@@ -6,8 +6,6 @@ import { asyncHandler } from '../utils/async-handler.js';
 
 export const playerRouter = Router();
 
-playerRouter.use(requireAuth);
-
 playerRouter.get('/tag/:playerTag', asyncHandler((req, res) => playerController.byTag(req, res)));
 playerRouter.get(
   '/tag/:playerTag/battlelog',
@@ -21,6 +19,8 @@ playerRouter.get(
   '/tag/:playerTag/full',
   asyncHandler((req, res) => playerController.fullByTag(req, res))
 );
+
+playerRouter.use(requireAuth);
 
 playerRouter.get('/me', asyncHandler((req, res) => playerController.me(req, res)));
 playerRouter.get(

@@ -19,6 +19,7 @@ contentRouter.post('/announcements/:id/vote', asyncHandler((req, res) => content
 contentRouter.post('/posts/:id/vote', asyncHandler((req, res) => contentController.votePostPoll(req, res)));
 contentRouter.post('/posts/:id/like', asyncHandler((req, res) => contentController.like(req, res)));
 contentRouter.get('/posts/:id/comments', asyncHandler((req, res) => contentController.comments(req, res)));
+contentRouter.get('/players/:playerTag/identity', asyncHandler((req, res) => contentController.playerIdentity(req, res)));
 contentRouter.post('/posts/:id/comment', asyncHandler((req, res) => contentController.comment(req, res)));
 contentRouter.post('/posts/:id/report', asyncHandler((req, res) => contentController.report(req, res)));
 contentRouter.post('/posts/:id/share', asyncHandler((req, res) => contentController.share(req, res)));

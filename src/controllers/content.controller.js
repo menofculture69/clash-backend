@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { pool } from '../config/database.js';
 import { env } from '../config/env.js';
+import { userRepository } from '../repositories/user.repository.js';
 import { cloudinaryService } from '../services/cloudinary.service.js';
 import { clashService } from '../services/clash.service.js';
 import { AppError } from '../utils/errors.js';
@@ -1467,6 +1468,18 @@ export class ContentController {
       [postId]
     );
     return res.json({ items: result.rows.map(mapComment) });
+  }
+
+  async playerIdentity(req, res) {
+    const playerTag = normalizeTag(String(req.params.playerTag ?? ''));
+    const user = await userRepository.getByPlayerTag(playerTag);
+    return res.json({
+      playerTag,
+      playerName: user?.player_name ?? '',
+      clanTag: user?.clan_tag ?? '',
+      clanName: user?.clan_name ?? '',
+      playerAvatarUrl: user?.avatar_url ?? ''
+    });
   }
 
   async share(req, res) {
