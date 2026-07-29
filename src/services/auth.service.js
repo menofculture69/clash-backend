@@ -254,5 +254,21 @@ export class AuthService {
       uploadedBytes: uploaded.bytes ?? null
     };
   }
+
+  async requestDeletion(userId, reason = '') {
+    const request = await userRepository.createDeletionRequest(userId, reason.trim());
+    if (!request) {
+      throw new AppError('User not found.', 404, true);
+    }
+    await sessionRepository.revokeUserSessions(userId);
+    return {
+      id: request.id,
+      playerTag: request.player_tag,
+      playerName: request.player_name,
+      status: request.status,
+      requestedAt: request.requested_at,
+      message: 'Your account deletion request was received. Admin will remove your app and server data within 1-2 days.'
+    };
+  }
 }
 export const authService = new AuthService();

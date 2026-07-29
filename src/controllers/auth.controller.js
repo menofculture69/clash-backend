@@ -26,5 +26,10 @@ export class AuthController {
     const payload = await authService.updateAvatar(req.auth.sub, req.body.dataUrl);
     res.status(200).json(payload);
   }
+
+  async requestDeletion(req, res) {
+    const payload = await authService.requestDeletion(req.auth.sub, req.body.reason ?? '');
+    res.status(201).json(payload);
+  }
 }
 export const authController = new AuthController();

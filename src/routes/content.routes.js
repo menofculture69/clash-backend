@@ -35,6 +35,7 @@ adminContentRouter.use(auditAdminMutation);
 adminContentRouter.post('/uploads/image', asyncHandler((req, res) => contentController.upload(req, res)));
 adminContentRouter.post('/users/:id/ban', asyncHandler((req, res) => contentController.banUser(req, res)));
 adminContentRouter.post('/users/:id/unban', asyncHandler((req, res) => contentController.unbanUser(req, res)));
+adminContentRouter.post('/users/:id/delete-data', asyncHandler((req, res) => contentController.deleteUserData(req, res)));
 adminContentRouter.get('/:kind', asyncHandler((req, res) => contentController.listAdmin(req, res)));
 adminContentRouter.post('/:kind', asyncHandler((req, res) => contentController.create(req, res)));
 adminContentRouter.patch('/:kind/:id', asyncHandler((req, res) => contentController.update(req, res)));

@@ -400,6 +400,26 @@ function mapReport(row) {
   };
 }
 
+function mapDeletionRequest(row) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    playerTag: row.player_tag,
+    playerName: row.player_name,
+    reason: row.reason,
+    status: row.status,
+    requestedAt: row.requested_at,
+    completedAt: row.completed_at,
+    clanTag: row.clan_tag,
+    clanName: row.clan_name,
+    avatarUrl: row.avatar_url,
+    postCount: Number(row.post_count ?? 0),
+    commentCount: Number(row.comment_count ?? 0),
+    followCount: Number(row.follow_count ?? 0),
+    activeSessionCount: Number(row.active_session_count ?? 0)
+  };
+}
+
 function mapArmyItem(row) {
   return {
     id: row.id,
@@ -695,6 +715,27 @@ export class ContentController {
 
   async listAdmin(req, res) {
     const kind = String(req.params.kind);
+    if (kind === 'deletionRequests') {
+      const result = await pool.query(
+        `
+        select
+          r.*,
+          u.clan_tag,
+          u.clan_name,
+          u.avatar_url,
+          (select count(*)::int from social_posts where player_tag = r.player_tag) as post_count,
+          (select count(*)::int from social_post_comments where player_tag = r.player_tag) as comment_count,
+          (select count(*)::int from social_follows where follower_tag = r.player_tag or following_tag = r.player_tag) as follow_count,
+          (select count(*)::int from app_sessions where user_id = r.user_id and revoked_at is null and expires_at > now()) as active_session_count
+        from account_deletion_requests r
+        left join app_users u on u.id = r.user_id
+        where r.status = 'pending'
+        order by r.requested_at asc
+        limit 200
+        `
+      );
+      return res.json({ items: result.rows.map(mapDeletionRequest) });
+    }
     if (kind === 'reports') {
       const result = await pool.query(
         `
@@ -1179,6 +1220,18 @@ export class ContentController {
       playerTag: result.rows[0].player_tag,
       playerName: result.rows[0].player_name,
       isBanned: false
+    });
+  }
+
+  async deleteUserData(req, res) {
+    const id = toUuid(req.params.id);
+    const deleted = await userRepository.deleteUserData(id);
+    if (!deleted) throw new AppError('User not found.', 404, true);
+    return res.json({
+      id: deleted.id,
+      playerTag: deleted.player_tag,
+      playerName: deleted.player_name,
+      message: 'User app and server data deleted.'
     });
   }
 

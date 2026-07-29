@@ -35,6 +35,13 @@ export class SessionRepository {
   async revokeSession(sessionId) {
     await pool.query(`update app_sessions set revoked_at = now() where id = $1`, [sessionId]);
   }
+
+  async revokeUserSessions(userId) {
+    await pool.query(
+      `update app_sessions set revoked_at = now() where user_id = $1 and revoked_at is null`,
+      [userId]
+    );
+  }
 }
 
 export const sessionRepository = new SessionRepository();

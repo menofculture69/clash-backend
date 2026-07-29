@@ -15,3 +15,7 @@ export const avatarUpdateSchema = z.object({
     .max(2_700_000, 'Image must be smaller than 2 MB.')
     .regex(/^data:image\/(?:jpeg|jpg|png|webp);base64,/i, 'Only JPEG, PNG, and WebP images are allowed.')
 });
+
+export const deletionRequestSchema = z.object({
+  reason: z.string().max(500).optional().default('')
+});

@@ -19,6 +19,21 @@ alter table app_users
   add column if not exists ban_reason text not null default '',
   add column if not exists banned_at timestamptz;
 
+create table if not exists account_deletion_requests (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references app_users(id) on delete cascade,
+  player_tag text not null,
+  player_name text not null,
+  reason text not null default '',
+  status text not null default 'pending' check (status in ('pending', 'completed')),
+  requested_at timestamptz not null default now(),
+  completed_at timestamptz,
+  unique (user_id, status)
+);
+
+create index if not exists idx_account_deletion_requests_status
+  on account_deletion_requests (status, requested_at desc);
+
 create table if not exists app_sessions (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references app_users(id) on delete cascade,
