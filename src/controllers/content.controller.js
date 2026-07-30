@@ -55,7 +55,7 @@ const armyLinkSchema = z.union([
   z.string().url().refine((value) => {
     const url = new URL(value);
     return url.hostname === 'link.clashofclans.com' && url.searchParams.get('action') === 'CopyArmy';
-  }, 'Use an official Clash of Clans CopyArmy link.')
+  }, 'Use a valid Clash of Clans CopyArmy link.')
 ]);
 const optionalWebUrlSchema = z.preprocess(
   (value) => {
@@ -166,17 +166,24 @@ const publicPostSchema = z.object({
   imageUrl: userImageUrlSchema.optional().default(''),
   pollQuestion: z.string().max(160).optional().nullable(),
   pollOptions: z.array(z.string().min(1).max(80)).max(6).optional().default([]),
-  hashtags: z.array(z.enum(socialHashtags)).max(5).optional().default([])
+  hashtags: z.array(z.enum(socialHashtags)).max(5).optional().default([]),
+  communityRulesAccepted: z.literal(true)
 });
 
 const commentSchema = z.object({
   playerTag: z.string().min(1),
-  body: safeSocialText(500).refine((value) => value.trim().length > 0, 'Comment cannot be empty.')
+  body: safeSocialText(500).refine((value) => value.trim().length > 0, 'Comment cannot be empty.'),
+  communityRulesAccepted: z.literal(true)
 });
 
 const followSchema = z.object({
   followerTag: z.string().min(1),
   followingTag: z.string().min(1)
+});
+
+const blockSchema = z.object({
+  blockerTag: z.string().min(1),
+  blockedTag: z.string().min(1)
 });
 
 const reportSchema = z.object({
@@ -298,7 +305,6 @@ function mapPost(row) {
   const isAdminPost =
     Boolean(row.is_admin_post) ||
     normalizedAuthorTag === 'admin' ||
-    normalizedAuthorTag === 'official' ||
     normalizedAuthorTag === 'clash companion';
 
   return {
@@ -323,6 +329,7 @@ function mapPost(row) {
     isAdminPost,
     isFollowing: Boolean(row.is_following),
     isLiked: Boolean(row.is_liked),
+    isBlocked: Boolean(row.is_blocked),
     viewerLiked: Boolean(row.is_liked),
     followerCount: Number(row.follower_count ?? 0),
     followingCount: Number(row.following_count ?? 0),
@@ -557,6 +564,25 @@ async function followCounts(playerTag, viewerTag = null) {
   };
 }
 
+async function isBlockedPair(leftTag, rightTag) {
+  const left = normalizeTag(leftTag);
+  const right = normalizeTag(rightTag);
+  const result = await pool.query(
+    `select 1 from social_blocks
+     where (blocker_tag = $1 and blocked_tag = $2)
+        or (blocker_tag = $2 and blocked_tag = $1)
+     limit 1`,
+    [left, right]
+  );
+  return result.rowCount > 0;
+}
+
+async function assertNotBlocked(leftTag, rightTag) {
+  if (await isBlockedPair(leftTag, rightTag)) {
+    throw new AppError('This interaction is not available.', 403, true);
+  }
+}
+
 export class ContentController {
   async listPublic(req, res, kind) {
     ensureKind(kind);
@@ -675,6 +701,13 @@ export class ContentController {
           return values.length;
         })()
       : null;
+    if (viewerIndex) {
+      filters.push(`not exists (
+        select 1 from social_blocks sb
+        where (sb.blocker_tag = $${viewerIndex} and sb.blocked_tag = p.player_tag)
+           or (sb.blocker_tag = p.player_tag and sb.blocked_tag = $${viewerIndex})
+      )`);
+    }
     const result = await pool.query(
       `
       select p.*,
@@ -688,6 +721,11 @@ export class ContentController {
           where spl.post_id = p.id
             and spl.player_tag = $${viewerIndex}
         )` : 'false'} as is_liked,
+        ${viewerIndex ? `exists (
+          select 1 from social_blocks sb
+          where (sb.blocker_tag = $${viewerIndex} and sb.blocked_tag = p.player_tag)
+             or (sb.blocker_tag = p.player_tag and sb.blocked_tag = $${viewerIndex})
+        )` : 'false'} as is_blocked,
         ${`case
           when jsonb_array_length(p.poll_options) = 0 then '[]'::jsonb
           else (
@@ -775,7 +813,9 @@ export class ContentController {
           (select count(*)::int from app_sessions where user_id = u.id) as session_count,
           (select count(*)::int from app_sessions where user_id = u.id and revoked_at is null and expires_at > now()) as active_session_count,
           (select count(*)::int from auth_audit_logs where player_tag = u.player_tag and success = false) as failed_login_count,
-          (select device_info from app_sessions where user_id = u.id order by coalesce(last_used_at, created_at) desc limit 1) as latest_device
+          (select device_info from app_sessions where user_id = u.id order by coalesce(last_used_at, created_at) desc limit 1) as latest_device,
+          (select count(*)::int from social_blocks where blocker_tag = u.player_tag) as blocked_user_count,
+          (select count(*)::int from social_blocks where blocked_tag = u.player_tag) as blocked_by_count
         from app_users u order by coalesce(
           (select max(created_at) from auth_audit_logs where player_tag = u.player_tag and success = true),
           u.created_at
@@ -789,7 +829,8 @@ export class ContentController {
         createdAt: row.created_at, updatedAt: row.updated_at,
         lastLoginAt: row.last_login_at, lastActiveAt: row.last_active_at,
         sessionCount: Number(row.session_count ?? 0), activeSessionCount: Number(row.active_session_count ?? 0),
-        failedLoginCount: Number(row.failed_login_count ?? 0), latestDevice: row.latest_device
+        failedLoginCount: Number(row.failed_login_count ?? 0), latestDevice: row.latest_device,
+        blockedUserCount: Number(row.blocked_user_count ?? 0), blockedByCount: Number(row.blocked_by_count ?? 0)
       })) });
     }
     ensureKind(kind);
@@ -1164,8 +1205,9 @@ export class ContentController {
   async votePostPoll(req, res) {
     const postId = toUuid(req.params.id);
     const { playerTag, optionIndex } = postVoteSchema.parse(req.body);
-    const post = await pool.query('select poll_options from social_posts where id = $1 and published = true', [postId]);
+    const post = await pool.query('select player_tag, poll_options from social_posts where id = $1 and published = true', [postId]);
     if (!post.rows[0]) throw new AppError('Post not found.', 404, true);
+    await assertNotBlocked(playerTag, post.rows[0].player_tag);
     if (optionIndex >= (post.rows[0].poll_options ?? []).length) {
       throw new AppError('Invalid poll option.', 400, true);
     }
@@ -1303,6 +1345,9 @@ export class ContentController {
     const postId = toUuid(req.params.id);
     const playerTag = authenticatedTag(req);
     await appUserIdForTag(playerTag);
+    const post = await pool.query('select player_tag from social_posts where id = $1 and published = true', [postId]);
+    if (!post.rows[0]) throw new AppError('Post not found.', 404, true);
+    await assertNotBlocked(playerTag, post.rows[0].player_tag);
     const existing = await pool.query(
       `
       select 1 from social_post_likes
@@ -1351,6 +1396,7 @@ export class ContentController {
     if (follower.playerTag === following.playerTag) {
       throw new AppError('You cannot follow yourself.', 400, true);
     }
+    await assertNotBlocked(follower.playerTag, following.playerTag);
 
     await pool.query(
       `
@@ -1393,6 +1439,34 @@ export class ContentController {
     );
     const counts = await followCounts(followingTag, followerTag);
     return res.json({ ...counts, isFollowing: false });
+  }
+
+  async block(req, res) {
+    const payload = blockSchema.parse(req.body);
+    const blockerTag = normalizeTag(payload.blockerTag);
+    const blockedTag = normalizeTag(payload.blockedTag);
+    if (blockerTag === blockedTag) {
+      throw new AppError('You cannot block yourself.', 400, true);
+    }
+    const blocker = await playerIdentity(blockerTag);
+    const blocked = await playerIdentity(blockedTag);
+    await pool.query(
+      `insert into social_blocks (blocker_tag, blocked_tag)
+       values ($1, $2)
+       on conflict (blocker_tag, blocked_tag) do nothing`,
+      [blocker.playerTag, blocked.playerTag]
+    );
+    await pool.query(
+      `delete from social_follows
+       where (follower_tag = $1 and following_tag = $2)
+          or (follower_tag = $2 and following_tag = $1)`,
+      [blocker.playerTag, blocked.playerTag]
+    );
+    return res.status(201).json({
+      blockerTag: blocker.playerTag,
+      blockedTag: blocked.playerTag,
+      isBlocked: true
+    });
   }
 
   async followCounts(req, res) {
@@ -1442,6 +1516,9 @@ export class ContentController {
     const postId = toUuid(req.params.id);
     const payload = commentSchema.parse(req.body);
     const identity = await playerIdentity(payload.playerTag);
+    const post = await pool.query('select player_tag from social_posts where id = $1 and published = true', [postId]);
+    if (!post.rows[0]) throw new AppError('Post not found.', 404, true);
+    await assertNotBlocked(identity.playerTag, post.rows[0].player_tag);
     const comment = await pool.query(
       `
       insert into social_post_comments (post_id, player_tag, player_name, body)
@@ -1539,6 +1616,9 @@ export class ContentController {
     const postId = toUuid(req.params.id);
     const playerTag = authenticatedTag(req);
     await appUserIdForTag(playerTag);
+    const post = await pool.query('select player_tag from social_posts where id = $1 and published = true', [postId]);
+    if (!post.rows[0]) throw new AppError('Post not found.', 404, true);
+    await assertNotBlocked(playerTag, post.rows[0].player_tag);
     await pool.query(
       `insert into social_post_shares (post_id, player_tag)
        values ($1, $2) on conflict do nothing`,

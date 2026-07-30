@@ -175,7 +175,7 @@ alter table social_posts
 
 update social_posts
 set is_admin_post = true
-where lower(trim(player_tag)) in ('admin', 'official', 'clash companion');
+where lower(trim(player_tag)) in ('admin', 'clash companion');
 
 update social_posts
 set hashtags = hashtags
@@ -281,6 +281,17 @@ create index if not exists idx_social_follows_follower
 
 create index if not exists idx_social_follows_following
   on social_follows (following_tag, created_at desc);
+
+create table if not exists social_blocks (
+  blocker_tag text not null,
+  blocked_tag text not null,
+  created_at timestamptz not null default now(),
+  primary key (blocker_tag, blocked_tag),
+  constraint social_blocks_not_self check (blocker_tag <> blocked_tag)
+);
+
+create index if not exists idx_social_blocks_blocked
+  on social_blocks (blocked_tag, created_at desc);
 
 create table if not exists army_items (
   id uuid primary key default gen_random_uuid(),

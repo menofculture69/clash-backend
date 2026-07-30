@@ -25,6 +25,7 @@ contentRouter.post('/posts/:id/report', asyncHandler((req, res) => contentContro
 contentRouter.post('/posts/:id/share', asyncHandler((req, res) => contentController.share(req, res)));
 contentRouter.post('/follows', asyncHandler((req, res) => contentController.follow(req, res)));
 contentRouter.delete('/follows', asyncHandler((req, res) => contentController.unfollow(req, res)));
+contentRouter.post('/blocks', asyncHandler((req, res) => contentController.block(req, res)));
 contentRouter.get('/follows/counts', optionalAuth, asyncHandler((req, res) => contentController.followCounts(req, res)));
 contentRouter.get('/follows/:type', optionalAuth, asyncHandler((req, res) => contentController.followList(req, res)));
 contentRouter.post('/uploads/image', asyncHandler((req, res) => contentController.upload(req, res)));

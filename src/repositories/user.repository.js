@@ -115,6 +115,7 @@ export class UserRepository {
       await client.query('delete from social_post_reports where reporter_tag = $1', [user.player_tag]);
       await client.query('delete from social_post_comments where player_tag = $1', [user.player_tag]);
       await client.query('delete from social_follows where follower_tag = $1 or following_tag = $1', [user.player_tag]);
+      await client.query('delete from social_blocks where blocker_tag = $1 or blocked_tag = $1', [user.player_tag]);
       await client.query('delete from social_posts where player_tag = $1', [user.player_tag]);
       await client.query('delete from auth_audit_logs where player_tag = $1', [user.player_tag]);
       await client.query(
