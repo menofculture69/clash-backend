@@ -1,5 +1,12 @@
 import { authService } from '../services/auth.service.js';
 export class AuthController {
+  async guest(req, res) {
+    const payload = await authService.guest({
+      deviceInfo: req.body.deviceInfo,
+      ipAddress: req.ip
+    });
+    res.status(201).json(payload);
+  }
   async login(req, res) {
     const payload = await authService.login({
       playerTag: req.body.playerTag,

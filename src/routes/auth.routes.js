@@ -5,7 +5,7 @@ import { asyncHandler } from '../utils/async-handler.js';
 import { requireAuth } from '../middleware/auth.js';
 import { authRateLimit } from '../middleware/rate-limit.js';
 import { validateBody } from '../middleware/validate.js';
-import { avatarUpdateSchema, deletionRequestSchema, loginSchema, refreshSchema } from '../validators/auth.validator.js';
+import { avatarUpdateSchema, deletionRequestSchema, guestLoginSchema, loginSchema, refreshSchema } from '../validators/auth.validator.js';
 
 export const authRouter = Router();
 
@@ -14,6 +14,12 @@ authRouter.post(
   authRateLimit,
   validateBody(loginSchema),
   asyncHandler((req, res) => authController.login(req, res))
+);
+authRouter.post(
+  '/guest',
+  authRateLimit,
+  validateBody(guestLoginSchema),
+  asyncHandler((req, res) => authController.guest(req, res))
 );
 authRouter.post(
   '/refresh',

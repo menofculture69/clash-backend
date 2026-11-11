@@ -1,6 +1,17 @@
 import { pool } from '../config/database.js';
 
 export class UserRepository {
+  async createGuest(input) {
+    const result = await pool.query(
+      `insert into app_users (player_tag, player_name, is_guest)
+       values ($1, $2, true)
+       returning id, player_tag, player_name, clan_tag, clan_name, avatar_url,
+                 is_guest, banned_until, ban_reason, banned_at`,
+      [input.playerTag, input.playerName]
+    );
+    return result.rows[0];
+  }
+
   async upsertUser(input) {
     const query = `
       insert into app_users (player_tag, player_name, clan_tag, clan_name, avatar_url)
@@ -12,7 +23,7 @@ export class UserRepository {
         clan_name = excluded.clan_name,
         avatar_url = excluded.avatar_url,
         updated_at = now()
-      returning id, player_tag, player_name, clan_tag, clan_name, avatar_url, banned_until, ban_reason, banned_at
+      returning id, player_tag, player_name, clan_tag, clan_name, avatar_url, is_guest, banned_until, ban_reason, banned_at
     `;
 
     const values = [
@@ -28,7 +39,7 @@ export class UserRepository {
 
   async getById(userId) {
     const result = await pool.query(
-      `select id, player_tag, player_name, clan_tag, clan_name, avatar_url, banned_until, ban_reason, banned_at from app_users where id = $1`,
+      `select id, player_tag, player_name, clan_tag, clan_name, avatar_url, is_guest, banned_until, ban_reason, banned_at from app_users where id = $1`,
       [userId]
     );
     return result.rows[0] ?? null;
@@ -36,7 +47,7 @@ export class UserRepository {
 
   async getByPlayerTag(playerTag) {
     const result = await pool.query(
-      `select id, player_tag, player_name, clan_tag, clan_name, avatar_url, banned_until, ban_reason, banned_at
+      `select id, player_tag, player_name, clan_tag, clan_name, avatar_url, is_guest, banned_until, ban_reason, banned_at
        from app_users
        where player_tag = $1`,
       [playerTag]

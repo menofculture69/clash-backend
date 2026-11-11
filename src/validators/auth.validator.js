@@ -6,6 +6,10 @@ export const loginSchema = z.object({
   deviceInfo: z.string().max(255).optional()
 });
 
+export const guestLoginSchema = z.object({
+  deviceInfo: z.string().max(255).optional()
+});
+
 export const refreshSchema = z.object({
   refreshToken: z.string().min(1)
 });

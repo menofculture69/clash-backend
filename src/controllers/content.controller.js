@@ -6,7 +6,7 @@ import { userRepository } from '../repositories/user.repository.js';
 import { cloudinaryService } from '../services/cloudinary.service.js';
 import { clashService } from '../services/clash.service.js';
 import { AppError } from '../utils/errors.js';
-import { normalizeTag } from '../utils/tag.js';
+import { isGuestTag, normalizeTag } from '../utils/tag.js';
 
 const townHalls = ['TH18', 'TH17', 'TH16', 'TH15'];
 const armyCategories = [
@@ -454,7 +454,7 @@ function mapHallAsset(row) {
 async function playerIdentity(playerTag) {
   const normalizedTag = normalizeTag(playerTag);
   const existingUser = await pool.query(
-    'select banned_until, ban_reason, banned_at from app_users where player_tag = $1',
+    'select player_name, avatar_url, clan_name, is_guest, banned_until, ban_reason, banned_at from app_users where player_tag = $1',
     [normalizedTag]
   );
   const ban = existingUser.rows[0];
@@ -465,6 +465,19 @@ async function playerIdentity(playerTag) {
       true,
       { ban: { bannedUntil: ban.banned_until, banReason: ban.ban_reason || '' } }
     );
+  }
+  if (isGuestTag(normalizedTag)) {
+    const guest = existingUser.rows[0];
+    if (!guest?.is_guest) {
+      throw new AppError('Guest account not found. Please join as a guest again.', 404, true);
+    }
+    return {
+      playerTag: normalizedTag,
+      playerName: guest.player_name,
+      playerAvatarUrl: guest.avatar_url,
+      playerClanName: null,
+      playerClanRole: null
+    };
   }
   const player = await clashService.getPlayer(normalizedTag);
   const leagueIcon =

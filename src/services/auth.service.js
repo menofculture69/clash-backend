@@ -80,6 +80,50 @@ function recordFailedLoginAttempt(key) {
 }
 
 export class AuthService {
+  async guest(input) {
+    const guestId = uuid().replaceAll('-', '').slice(0, 12).toUpperCase();
+    const playerTag = `#GUEST-${guestId}`;
+    const user = await userRepository.createGuest({
+      playerTag,
+      playerName: `Guest Commander ${guestId.slice(-6)}`
+    });
+    const expiresAt = new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+    const session = await sessionRepository.createSession({
+      userId: user.id,
+      refreshTokenHash: hashToken(uuid()),
+      deviceInfo: input.deviceInfo ?? 'flutter-guest',
+      expiresAt
+    });
+    const accessToken = signAccessToken({
+      sub: user.id,
+      sessionId: session.id,
+      playerTag: user.player_tag,
+      playerName: user.player_name,
+      clanTag: null,
+      isGuest: true
+    });
+    const refreshToken = signRefreshToken({ sub: user.id, sessionId: session.id });
+    await sessionRepository.rotateRefreshToken(session.id, hashToken(refreshToken), expiresAt);
+    await this.logAuthEventSafe({
+      playerTag,
+      success: true,
+      ipAddress: input.ipAddress,
+      deviceInfo: input.deviceInfo ?? 'flutter-guest'
+    });
+    return {
+      accessToken,
+      refreshToken,
+      session: {
+        playerTag: user.player_tag,
+        playerName: user.player_name,
+        clanTag: null,
+        clanName: null,
+        playerAvatarUrl: null,
+        isGuest: true
+      }
+    };
+  }
+
   async login(input) {
     const playerTag = normalizeTag(input.playerTag);
     const attemptKey = loginAttemptKey(playerTag, input.ipAddress);
@@ -122,7 +166,8 @@ export class AuthService {
         sessionId: session.id,
         playerTag: user.player_tag,
         playerName: user.player_name,
-        clanTag: user.clan_tag
+        clanTag: user.clan_tag,
+        isGuest: false
       };
       const accessToken = signAccessToken(authClaims);
       const refreshToken = signRefreshToken({
@@ -145,7 +190,8 @@ export class AuthService {
           playerName: user.player_name,
           clanTag: user.clan_tag,
           clanName: user.clan_name,
-          playerAvatarUrl: user.avatar_url
+          playerAvatarUrl: user.avatar_url,
+          isGuest: false
         }
       };
     } catch (error) {
@@ -203,7 +249,8 @@ export class AuthService {
       sessionId: session.id,
       playerTag: user.player_tag,
       playerName: user.player_name,
-      clanTag: user.clan_tag
+      clanTag: user.clan_tag,
+      isGuest: Boolean(user.is_guest)
     });
     return {
       accessToken,
@@ -227,7 +274,8 @@ export class AuthService {
       playerAvatarUrl: user.avatar_url,
       isBanned: Boolean(ban),
       bannedUntil: ban?.bannedUntil ?? null,
-      banReason: ban?.banReason ?? ''
+      banReason: ban?.banReason ?? '',
+      isGuest: Boolean(user.is_guest)
     };
   }
 

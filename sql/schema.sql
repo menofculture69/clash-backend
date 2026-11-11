@@ -7,6 +7,7 @@ create table if not exists app_users (
   clan_tag text,
   clan_name text,
   avatar_url text,
+  is_guest boolean not null default false,
   banned_until timestamptz,
   ban_reason text not null default '',
   banned_at timestamptz,
@@ -15,6 +16,7 @@ create table if not exists app_users (
 );
 
 alter table app_users
+  add column if not exists is_guest boolean not null default false,
   add column if not exists banned_until timestamptz,
   add column if not exists ban_reason text not null default '',
   add column if not exists banned_at timestamptz;
